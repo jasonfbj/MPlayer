@@ -1,0 +1,37 @@
+.superpowers/
+
+# Build
+build/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+
+# macOS
+.DS_Store
+
+# Third party binaries
+third_party/ffmpeg/windows/
+third_party/ffmpeg/android/
+third_party/ffmpeg/macOS/
+
+# Android
+*.apk
+*.ap_
+*.dex
+local.properties
+.gradle/
+.idea/
+
+# Compiled
+*.o
+*.obj
+*.lib
+*.dll
+*.so
+*.exe
