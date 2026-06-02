@@ -2,6 +2,8 @@
 #include "core/controller/PlayerController.h"
 #include "GLESRenderer.h"
 #include "AndroidAudioOutput.h"
+#include "MediaCodecDecoder.h"
+#include "core/decoder/DecoderFactory.h"
 
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -128,6 +130,25 @@ void MPlayerJNI::nativeSetSurface(JNIEnv* env, jobject thiz, jlong handle, jobje
 
     auto audio = std::make_unique<AndroidAudioOutput>();
     player->setAudioOutput(std::move(audio));
+
+    // Register hardware decoder factory
+    static jobject g_surface = nullptr;
+    static JNIEnv* g_env = env;
+
+    if (g_surface) {
+        g_env->DeleteGlobalRef(g_surface);
+    }
+    g_surface = env->NewGlobalRef(surface);
+
+    DecoderFactory::registerHardwareCreator([g_surface](void*) ->
+        std::unique_ptr<IDecoder> {
+        auto decoder = std::make_unique<MediaCodecDecoder>();
+        decoder->setJniEnv(g_env);
+        if (g_surface) {
+            decoder->setSurface(g_surface);
+        }
+        return decoder;
+    });
 }
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
