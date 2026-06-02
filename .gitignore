@@ -27,6 +27,7 @@ third_party/ffmpeg/macOS/
 local.properties
 .gradle/
 .idea/
+.cxx/
 
 # Compiled
 *.o

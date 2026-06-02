@@ -1,5 +1,8 @@
 #pragma once
 
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
 #include "core/common/NonCopyable.h"
 #include "core/controller/PlayerController.h"
 

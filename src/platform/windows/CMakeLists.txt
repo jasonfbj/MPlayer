@@ -1,4 +1,4 @@
-add_executable(MPlayerWin
+add_executable(MPlayerWin WIN32
     main.cpp
     WinMainWindow.cpp
     D3D11Renderer.cpp

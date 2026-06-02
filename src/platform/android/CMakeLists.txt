@@ -4,6 +4,10 @@ add_library(MPlayerAndroid SHARED
     AndroidAudioOutput.cpp
 )
 
+target_include_directories(MPlayerAndroid PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 target_link_libraries(MPlayerAndroid PRIVATE
     MPlayerCore
     EGL

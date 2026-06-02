@@ -9,15 +9,15 @@ WinMainWindow::~WinMainWindow() {
 }
 
 bool WinMainWindow::init(HINSTANCE hInstance, int nCmdShow) {
-    WNDCLASSEX wc = {};
+    WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
     wc.style = CS_CLASSDC;
     wc.lpfnWndProc = wndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"MPlayer";
-    RegisterClassEx(&wc);
+    RegisterClassExW(&wc);
 
-    hwnd_ = CreateWindowEx(0, L"MPlayer", L"MPlayer",
+    hwnd_ = CreateWindowExW(0, L"MPlayer", L"MPlayer",
         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
         windowWidth_, windowHeight_, nullptr, nullptr, hInstance, this);
 
