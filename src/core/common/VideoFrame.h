@@ -3,6 +3,21 @@
 #include <cstdint>
 #include <vector>
 
+// Hardware decode platform texture representation
+struct NativeTexture {
+    enum Type {
+        D3D11_TEXTURE,              // Windows: ID3D11Texture2D*
+        GL_TEXTURE_EXTERNAL_OES,    // Android: GLuint
+        ANDROID_SURFACE_DIRECT      // Android: MediaCodec direct surface render
+    };
+
+    Type type = D3D11_TEXTURE;
+    void* handle = nullptr;     // D3D11: ID3D11Texture2D*, Android: GLuint (cast)
+    int width = 0;
+    int height = 0;
+    int index = 0;              // D3D11VA texture array index
+};
+
 struct VideoFrame {
     enum Format {
         YUV420P,
@@ -16,16 +31,16 @@ struct VideoFrame {
     int width = 0;
     int height = 0;
 
-    // YUV平面数据
+    // YUV planar data (software decode)
     std::vector<uint8_t> data[3];  // Y, U, V
     int linesize[3] = {0, 0, 0};
 
-    // 或 RGBA packed
+    // Or RGBA packed
     std::vector<uint8_t> rgbaData;
 
-    // 平台纹理句柄 (硬解)
-    void* nativeTexture = nullptr;
+    // Platform texture (hardware decode)
+    NativeTexture nativeTex;
 
-    double pts = 0.0;  // 显示时间戳 (秒)
+    double pts = 0.0;           // Presentation timestamp (seconds)
     double duration = 0.0;
 };
