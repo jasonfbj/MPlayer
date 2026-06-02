@@ -10,6 +10,7 @@
 #include "core/decoder/DecoderFactory.h"
 #include "core/renderer/IRenderer.h"
 #include "core/audio/IAudioOutput.h"
+#include "core/audio/AudioResampler.h"
 
 #include <memory>
 #include <thread>
@@ -68,6 +69,8 @@ public:
 
     VideoInfo getVideoInfo() const;
 
+    bool captureFrame(const std::string& savePath);
+
     // 获取帧队列供外部消费
     BlockingQueue<VideoFrame>& videoFrameQueue() { return videoFrameQueue_; }
     BlockingQueue<AudioFrame>& audioFrameQueue() { return audioFrameQueue_; }
@@ -85,6 +88,7 @@ private:
     std::unique_ptr<IDecoder> audioDecoder_;
     std::unique_ptr<IRenderer> renderer_;
     std::unique_ptr<IAudioOutput> audioOutput_;
+    std::unique_ptr<AudioResampler> audioResampler_;
 
     BlockingQueue<AVPacket*> videoPacketQueue_;
     BlockingQueue<AVPacket*> audioPacketQueue_;
