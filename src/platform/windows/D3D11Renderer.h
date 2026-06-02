@@ -16,9 +16,12 @@ public:
 
     bool init(void* nativeWindow) override;
     bool renderFrame(const VideoFrame& frame) override;
-    bool renderTexture(void* nativeTexture, int width, int height) override;
+    bool renderTexture(const NativeTexture& texture) override;
     void resize(int width, int height) override;
     void destroy() override;
+
+    void* getNativeDevice() const override { return device_.Get(); }
+    void* getNativeDeviceContext() const override { return context_.Get(); }
 
 private:
     bool createDevice();
@@ -27,6 +30,8 @@ private:
     bool createShaders();
     bool createSamplerState();
     bool createVertexBuffer();
+    bool createNV12Shader();
+    bool createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int width, int height);
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -47,4 +52,11 @@ private:
     int width_ = 0;
     int height_ = 0;
     bool initialized_ = false;
+
+    // NV12 hardware decode rendering
+    ComPtr<ID3D11PixelShader> nv12PixelShader_;
+    ComPtr<ID3D11ShaderResourceView> nv12YSRV_;
+    ComPtr<ID3D11ShaderResourceView> nv12UVSRV_;
+    int hwTexWidth_ = 0;
+    int hwTexHeight_ = 0;
 };
