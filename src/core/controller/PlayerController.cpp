@@ -1,5 +1,11 @@
 #include "core/controller/PlayerController.h"
 
+#ifdef _WIN32
+#include "platform/windows/D3D11VAHardwareDecoder.h"
+#elif defined(__ANDROID__)
+#include "platform/android/MediaCodecDecoder.h"
+#endif
+
 extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
@@ -35,9 +41,13 @@ bool PlayerController::open(const std::string& url) {
     currentUrl_ = url;
 
     if (demuxer_->getVideoStreamIndex() >= 0) {
+        void* device = nullptr;
+        if (renderer_) device = renderer_->getNativeDevice();
+
         videoDecoder_ = DecoderFactory::createVideoDecoder(
             demuxer_->getVideoParams(),
-            DecoderFactory::DecoderType::Auto
+            DecoderFactory::DecoderType::Auto,
+            device
         );
         if (!videoDecoder_) {
             if (errorCb_) errorCb_("Failed to create video decoder");
@@ -75,9 +85,13 @@ bool PlayerController::open(const std::string& url, const NetworkConfig& config)
     currentUrl_ = url;
 
     if (demuxer_->getVideoStreamIndex() >= 0) {
+        void* device = nullptr;
+        if (renderer_) device = renderer_->getNativeDevice();
+
         videoDecoder_ = DecoderFactory::createVideoDecoder(
             demuxer_->getVideoParams(),
-            DecoderFactory::DecoderType::Auto
+            DecoderFactory::DecoderType::Auto,
+            device
         );
         if (!videoDecoder_) {
             if (errorCb_) errorCb_("Failed to create video decoder");
@@ -275,26 +289,50 @@ void PlayerController::videoDecodeThread() {
                 streams[demuxer_->getVideoStreamIndex()]->time_base;
             vf.pts = frame->pts * av_q2d(timeBase);
 
-            if (frame->format == AV_PIX_FMT_YUV420P) {
-                vf.format = VideoFrame::YUV420P;
-                for (int i = 0; i < 3; i++) {
-                    vf.linesize[i] = frame->linesize[i];
-                    int h = (i == 0) ? frame->height : frame->height / 2;
-                    int size = frame->linesize[i] * h;
-                    vf.data[i].assign(frame->data[i], frame->data[i] + size);
+            if (videoDecoder_->isHardware()) {
+                // Hardware decode path - NativeTexture
+                vf.format = VideoFrame::NativeTexture;
+
+#ifdef _WIN32
+                auto* d3d11dec = dynamic_cast<D3D11VAHardwareDecoder*>(videoDecoder_.get());
+                if (d3d11dec) {
+                    d3d11dec->getLastNativeTexture(vf.nativeTex);
                 }
-            } else if (frame->format == AV_PIX_FMT_NV12) {
-                vf.format = VideoFrame::NV12;
-                vf.linesize[0] = frame->linesize[0];
-                vf.linesize[1] = frame->linesize[1];
-                int ySize = frame->linesize[0] * frame->height;
-                vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
-                int uvSize = frame->linesize[1] * frame->height / 2;
-                vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+#elif defined(__ANDROID__)
+                auto* mcdec = dynamic_cast<MediaCodecDecoder*>(videoDecoder_.get());
+                if (mcdec) {
+                    mcdec->getLastNativeTexture(vf.nativeTex);
+                }
+#endif
+            } else {
+                // Software decode path - YUV data
+                if (frame->format == AV_PIX_FMT_YUV420P) {
+                    vf.format = VideoFrame::YUV420P;
+                    for (int i = 0; i < 3; i++) {
+                        vf.linesize[i] = frame->linesize[i];
+                        int h = (i == 0) ? frame->height : frame->height / 2;
+                        int size = frame->linesize[i] * h;
+                        vf.data[i].assign(frame->data[i], frame->data[i] + size);
+                    }
+                } else if (frame->format == AV_PIX_FMT_NV12) {
+                    vf.format = VideoFrame::NV12;
+                    vf.linesize[0] = frame->linesize[0];
+                    vf.linesize[1] = frame->linesize[1];
+                    int ySize = frame->linesize[0] * frame->height;
+                    vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
+                    int uvSize = frame->linesize[1] * frame->height / 2;
+                    vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+                }
             }
 
             if (videoFrameCb_) {
                 videoFrameCb_(vf);
+            }
+
+            // Cache latest frame for screenshot
+            {
+                std::lock_guard<std::mutex> lock(frameMutex_);
+                lastFrame_ = vf;
             }
 
             videoFrameQueue_.push(std::move(vf));
@@ -356,4 +394,8 @@ void PlayerController::setConnectionCallback(ConnectionCallback cb) {
 
 ConnectionState PlayerController::connectionState() const {
     return demuxer_ ? demuxer_->connectionState() : ConnectionState::Disconnected;
+}
+
+void PlayerController::initAudioResampler() {
+    // Phase 3: AudioResampler initialization
 }

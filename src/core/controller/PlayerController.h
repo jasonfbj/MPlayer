@@ -51,6 +51,8 @@ public:
     void setRenderer(std::unique_ptr<IRenderer> renderer);
     void setAudioOutput(std::unique_ptr<IAudioOutput> audioOutput);
 
+    void setNativeDevice(void* device) { nativeDevice_ = device; }
+
     using FrameCallback = std::function<void(const VideoFrame&)>;
     void setVideoFrameCallback(FrameCallback cb) { videoFrameCb_ = std::move(cb); }
 
@@ -76,6 +78,7 @@ private:
     void audioDecodeThread();
 
     void setState(State s);
+    void initAudioResampler();
 
     std::unique_ptr<Demuxer> demuxer_;
     std::unique_ptr<IDecoder> videoDecoder_;
@@ -98,6 +101,10 @@ private:
     std::atomic<double> currentPosition_{0.0};
     std::string currentUrl_;
     mutable std::mutex mutex_;
+
+    void* nativeDevice_ = nullptr;
+    mutable std::mutex frameMutex_;
+    VideoFrame lastFrame_;
 
     FrameCallback videoFrameCb_;
     StateCallback stateCb_;
