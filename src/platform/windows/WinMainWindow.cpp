@@ -1,6 +1,8 @@
 #include "WinMainWindow.h"
 #include "D3D11Renderer.h"
+#include "D3D11VAHardwareDecoder.h"
 #include "WinAudioOutput.h"
+#include "core/decoder/DecoderFactory.h"
 
 #include <commdlg.h>
 
@@ -34,6 +36,17 @@ bool WinMainWindow::init(HINSTANCE hInstance, int nCmdShow) {
 
     auto audio = std::make_unique<WinAudioOutput>();
     player_->setAudioOutput(std::move(audio));
+
+    // Register hardware decoder factory
+    DecoderFactory::registerHardwareCreator([](void* sharedDevice) ->
+        std::unique_ptr<IDecoder> {
+        auto decoder = std::make_unique<D3D11VAHardwareDecoder>();
+        if (sharedDevice) {
+            auto* dev = static_cast<ID3D11Device*>(sharedDevice);
+            decoder->setSharedDevice(dev);
+        }
+        return decoder;
+    });
 
     running_ = true;
     return true;
