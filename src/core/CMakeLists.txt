@@ -6,6 +6,10 @@ add_library(MPlayerCore STATIC
     controller/PlayerController.cpp
 )
 
+if(MSVC)
+    target_compile_options(MPlayerCore PUBLIC /utf-8)
+endif()
+
 target_include_directories(MPlayerCore PUBLIC
     ${CMAKE_SOURCE_DIR}/src
 )
