@@ -13,11 +13,13 @@ public:
         Hardware
     };
 
-    using HardwareCreator = std::function<std::unique_ptr<IDecoder>()>;
+    // sharedDevice: Windows=ID3D11Device*, Android=jobject Surface (cast to void*)
+    using HardwareCreator = std::function<std::unique_ptr<IDecoder>(void* sharedDevice)>;
 
     static std::unique_ptr<IDecoder> createVideoDecoder(
         const AVCodecParameters* params,
-        DecoderType type = DecoderType::Auto
+        DecoderType type = DecoderType::Auto,
+        void* sharedDevice = nullptr
     );
 
     static std::unique_ptr<IDecoder> createAudioDecoder(

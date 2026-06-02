@@ -39,7 +39,7 @@ struct VideoFrame {
     std::vector<uint8_t> rgbaData;
 
     // Platform texture (hardware decode)
-    NativeTexture nativeTex;
+    struct NativeTexture nativeTex;
 
     double pts = 0.0;           // Presentation timestamp (seconds)
     double duration = 0.0;
