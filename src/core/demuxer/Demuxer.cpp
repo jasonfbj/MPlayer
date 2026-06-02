@@ -173,6 +173,7 @@ double Demuxer::duration() const {
 }
 
 void Demuxer::setConnectionCallback(ConnectionCallback cb) {
+    std::lock_guard<std::mutex> lock(connCbMutex_);
     connCb_ = std::move(cb);
 }
 

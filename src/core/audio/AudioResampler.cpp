@@ -70,27 +70,35 @@ bool AudioResampler::setSpeed(float speed) {
 bool AudioResampler::process(const AVFrame* input, std::vector<uint8_t>& output) {
     if (!initialized_ || !srcCtx_ || !sinkCtx_) return false;
 
+    output.clear();
+
     int ret = av_buffersrc_add_frame_flags(srcCtx_,
         const_cast<AVFrame*>(input), AV_BUFFERSRC_FLAG_KEEP_REF);
     if (ret < 0) return false;
 
-    AVFrame* filtFrame = av_frame_alloc();
-    ret = av_buffersink_get_frame(sinkCtx_, filtFrame);
-    if (ret < 0) {
+    // Drain all available frames from the filter graph
+    while (true) {
+        AVFrame* filtFrame = av_frame_alloc();
+        ret = av_buffersink_get_frame(sinkCtx_, filtFrame);
+        if (ret < 0) {
+            av_frame_free(&filtFrame);
+            break;  // No more frames available (AVERROR(EAGAIN) or EOF)
+        }
+
+        int dataSize = av_samples_get_buffer_size(nullptr,
+            filtFrame->ch_layout.nb_channels,
+            filtFrame->nb_samples,
+            static_cast<AVSampleFormat>(filtFrame->format), 1);
+
+        if (dataSize > 0 && filtFrame->data[0]) {
+            size_t oldSize = output.size();
+            output.resize(oldSize + dataSize);
+            memcpy(output.data() + oldSize, filtFrame->data[0], dataSize);
+        }
+
         av_frame_free(&filtFrame);
-        return false;
     }
 
-    int dataSize = av_samples_get_buffer_size(nullptr,
-        filtFrame->ch_layout.nb_channels,
-        filtFrame->nb_samples,
-        static_cast<AVSampleFormat>(filtFrame->format), 1);
-
-    if (dataSize > 0 && filtFrame->data[0]) {
-        output.assign(filtFrame->data[0], filtFrame->data[0] + dataSize);
-    }
-
-    av_frame_free(&filtFrame);
     return !output.empty();
 }
 

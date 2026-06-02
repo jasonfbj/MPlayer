@@ -132,18 +132,34 @@ void MPlayerJNI::nativeSetSurface(JNIEnv* env, jobject thiz, jlong handle, jobje
     player->setAudioOutput(std::move(audio));
 
     // Register hardware decoder factory
+    // NOTE: Single-player limitation — static g_surface/g_vm means only one
+    // PlayerController can use hardware decode at a time. For multi-player,
+    // each controller would need its own surface reference.
     static jobject g_surface = nullptr;
-    static JNIEnv* g_env = env;
+    static JavaVM* g_vm = nullptr;
+
+    // Cache JavaVM from JNI_OnLoad (valid across threads, unlike JNIEnv*)
+    if (!g_vm) {
+        env->GetJavaVM(&g_vm);
+    }
 
     if (g_surface) {
-        g_env->DeleteGlobalRef(g_surface);
+        // Use attached env to delete old ref
+        JNIEnv* delEnv = nullptr;
+        if (g_vm->GetEnv(reinterpret_cast<void**>(&delEnv), JNI_VERSION_1_6) == JNI_OK) {
+            delEnv->DeleteGlobalRef(g_surface);
+        }
     }
     g_surface = env->NewGlobalRef(surface);
 
     DecoderFactory::registerHardwareCreator([g_surface](void*) ->
         std::unique_ptr<IDecoder> {
         auto decoder = std::make_unique<MediaCodecDecoder>();
-        decoder->setJniEnv(g_env);
+        // Get JNIEnv from cached JavaVM (thread-safe)
+        JNIEnv* jniEnv = nullptr;
+        if (g_vm && g_vm->GetEnv(reinterpret_cast<void**>(&jniEnv), JNI_VERSION_1_6) == JNI_OK) {
+            decoder->setJniEnv(jniEnv);
+        }
         if (g_surface) {
             decoder->setSurface(g_surface);
         }

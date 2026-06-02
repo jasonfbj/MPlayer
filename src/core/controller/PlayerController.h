@@ -52,8 +52,6 @@ public:
     void setRenderer(std::unique_ptr<IRenderer> renderer);
     void setAudioOutput(std::unique_ptr<IAudioOutput> audioOutput);
 
-    void setNativeDevice(void* device) { nativeDevice_ = device; }
-
     using FrameCallback = std::function<void(const VideoFrame&)>;
     void setVideoFrameCallback(FrameCallback cb) { videoFrameCb_ = std::move(cb); }
 
@@ -106,7 +104,6 @@ private:
     std::string currentUrl_;
     mutable std::mutex mutex_;
 
-    void* nativeDevice_ = nullptr;
     mutable std::mutex frameMutex_;
     VideoFrame lastFrame_;
 

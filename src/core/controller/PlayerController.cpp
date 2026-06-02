@@ -11,8 +11,10 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
+#ifndef STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#endif
 
 extern "C" {
 #include <libswscale/swscale.h>
@@ -73,11 +75,17 @@ bool PlayerController::open(const std::string& url) {
         audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
     }
 
+    initAudioResampler();
+
     setState(Stopped);
     return true;
 }
 
 bool PlayerController::open(const std::string& url, const NetworkConfig& config) {
+    // Delegate to the simple overload — Demuxer::open(url) forwards to open(url, defaultConfig)
+    // To avoid code duplication, just set config on demuxer and call the base open
+    (void)config;  // Use NetworkConfig via Demuxer directly
+    // Actually, open with specific config:
     std::lock_guard<std::mutex> lock(mutex_);
 
     if (state_ != Idle && state_ != Stopped) {
@@ -116,6 +124,8 @@ bool PlayerController::open(const std::string& url, const NetworkConfig& config)
         auto* aparams = demuxer_->getAudioParams();
         audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
     }
+
+    initAudioResampler();
 
     setState(Stopped);
     return true;
@@ -446,11 +456,21 @@ bool PlayerController::captureFrame(const std::string& savePath) {
 
     if (frame.width <= 0 || frame.height <= 0) return false;
 
-    // YUV420P -> RGBA
+    // Determine source pixel format
+    AVPixelFormat srcFmt = AV_PIX_FMT_NONE;
+    if (frame.format == VideoFrame::YUV420P) {
+        srcFmt = AV_PIX_FMT_YUV420P;
+    } else if (frame.format == VideoFrame::NV12) {
+        srcFmt = AV_PIX_FMT_NV12;
+    } else {
+        return false;  // Unsupported format for screenshot
+    }
+
+    // YUV/NV12 -> RGBA
     std::vector<uint8_t> rgbaData(frame.width * frame.height * 4);
 
     SwsContext* swsCtx = sws_getContext(
-        frame.width, frame.height, AV_PIX_FMT_YUV420P,
+        frame.width, frame.height, srcFmt,
         frame.width, frame.height, AV_PIX_FMT_RGBA,
         SWS_BILINEAR, nullptr, nullptr, nullptr);
 

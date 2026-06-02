@@ -9,8 +9,6 @@ void D3D11VAHardwareDecoder::setSharedDevice(ID3D11Device* device) {
     sharedDevice_ = device;
     if (device) {
         device->GetImmediateContext(&sharedContext_);
-    } else {
-        sharedContext_ = nullptr;
     }
 }
 
@@ -53,8 +51,8 @@ bool D3D11VAHardwareDecoder::init(const AVCodecParameters* params) {
         // AddRef before handing to FFmpeg — FFmpeg will Release() on cleanup
         sharedDevice_->AddRef();
         sharedContext_->AddRef();
-        d3d11Ctx->device = sharedDevice_;
-        d3d11Ctx->device_context = sharedContext_;
+        d3d11Ctx->device = sharedDevice_.Get();
+        d3d11Ctx->device_context = sharedContext_.Get();
         d3d11Ctx->lock_ctx = nullptr;
         d3d11Ctx->lock = nullptr;
         d3d11Ctx->unlock = nullptr;
@@ -104,7 +102,6 @@ bool D3D11VAHardwareDecoder::decode(const AVPacket* packet, AVFrame* frame) {
     if (frame->format == AV_PIX_FMT_D3D11) {
         auto* desc = reinterpret_cast<AVD3D11FrameDescriptor*>(frame->data[0]);
         if (desc && desc->texture) {
-            decodedTexture_ = desc->texture;
             lastTexture_ = desc->texture;
             lastIndex_ = desc->index;
         }
@@ -126,10 +123,9 @@ void D3D11VAHardwareDecoder::destroy() {
         av_buffer_unref(&hwDeviceCtx_);
         hwDeviceCtx_ = nullptr;
     }
-    decodedTexture_.Reset();
     lastTexture_.Reset();
-    sharedDevice_ = nullptr;
-    sharedContext_ = nullptr;
+    sharedDevice_.Reset();
+    sharedContext_.Reset();
     lastIndex_ = 0;
     lastWidth_ = 0;
     lastHeight_ = 0;

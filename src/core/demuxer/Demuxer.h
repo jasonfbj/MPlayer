@@ -2,6 +2,7 @@
 
 #include <string>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <chrono>
 
@@ -47,6 +48,7 @@ private:
 
     NetworkConfig netConfig_;
     ConnectionCallback connCb_;
+    std::mutex connCbMutex_;
     std::atomic<ConnectionState> connState_{ConnectionState::Disconnected};
     std::string currentUrl_;
 
@@ -54,6 +56,7 @@ private:
 
     void setConnState(ConnectionState s, const std::string& msg = "") {
         connState_ = s;
+        std::lock_guard<std::mutex> lock(connCbMutex_);
         if (connCb_) connCb_(s, msg);
     }
 };
