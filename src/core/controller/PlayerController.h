@@ -5,6 +5,7 @@
 #include "core/common/BlockingQueue.h"
 #include "core/audio/AudioFrame.h"
 #include "core/demuxer/Demuxer.h"
+#include "core/demuxer/NetworkConfig.h"
 #include "core/decoder/IDecoder.h"
 #include "core/decoder/DecoderFactory.h"
 #include "core/renderer/IRenderer.h"
@@ -32,6 +33,7 @@ public:
     ~PlayerController();
 
     bool open(const std::string& url);
+    bool open(const std::string& url, const NetworkConfig& config);
     void close();
 
     void play();
@@ -57,6 +59,10 @@ public:
 
     using ErrorCallback = std::function<void(const std::string&)>;
     void setErrorCallback(ErrorCallback cb) { errorCb_ = std::move(cb); }
+
+    using ConnectionCallback = std::function<void(ConnectionState, const std::string&)>;
+    void setConnectionCallback(ConnectionCallback cb);
+    ConnectionState connectionState() const;
 
     VideoInfo getVideoInfo() const;
 

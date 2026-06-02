@@ -60,6 +60,46 @@ bool PlayerController::open(const std::string& url) {
     return true;
 }
 
+bool PlayerController::open(const std::string& url, const NetworkConfig& config) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (state_ != Idle && state_ != Stopped) {
+        close();
+    }
+
+    if (!demuxer_->open(url, config)) {
+        if (errorCb_) errorCb_("Failed to open: " + url);
+        return false;
+    }
+
+    currentUrl_ = url;
+
+    if (demuxer_->getVideoStreamIndex() >= 0) {
+        videoDecoder_ = DecoderFactory::createVideoDecoder(
+            demuxer_->getVideoParams(),
+            DecoderFactory::DecoderType::Auto
+        );
+        if (!videoDecoder_) {
+            if (errorCb_) errorCb_("Failed to create video decoder");
+            return false;
+        }
+    }
+
+    if (demuxer_->getAudioStreamIndex() >= 0) {
+        audioDecoder_ = DecoderFactory::createAudioDecoder(
+            demuxer_->getAudioParams()
+        );
+    }
+
+    if (audioOutput_ && demuxer_->getAudioStreamIndex() >= 0) {
+        auto* aparams = demuxer_->getAudioParams();
+        audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
+    }
+
+    setState(Stopped);
+    return true;
+}
+
 void PlayerController::close() {
     stop();
 
@@ -306,4 +346,14 @@ void PlayerController::audioDecodeThread() {
 void PlayerController::setState(State s) {
     state_ = s;
     if (stateCb_) stateCb_(s);
+}
+
+void PlayerController::setConnectionCallback(ConnectionCallback cb) {
+    if (demuxer_) {
+        demuxer_->setConnectionCallback(std::move(cb));
+    }
+}
+
+ConnectionState PlayerController::connectionState() const {
+    return demuxer_ ? demuxer_->connectionState() : ConnectionState::Disconnected;
 }
