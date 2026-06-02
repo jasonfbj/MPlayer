@@ -119,6 +119,19 @@ AVPixelFormat MediaCodecDecoder::outputFormat() const {
     return AV_PIX_FMT_MEDIACODEC;
 }
 
+void MediaCodecDecoder::setJniEnv(JNIEnv* env) {
+    jniEnv_ = env;
+}
+
+bool MediaCodecDecoder::getLastNativeTexture(NativeTexture& tex) const {
+    tex.type = NativeTexture::ANDROID_SURFACE_DIRECT;
+    tex.handle = nullptr;
+    tex.width = width_;
+    tex.height = height_;
+    tex.index = 0;
+    return configured_;
+}
+
 void MediaCodecDecoder::setSurface(jobject surface) {
     surface_ = surface;
 }

@@ -2,6 +2,11 @@
 
 #include <string>
 #include <atomic>
+#include <mutex>
+#include <thread>
+#include <chrono>
+
+#include "core/demuxer/NetworkConfig.h"
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -14,6 +19,7 @@ public:
     ~Demuxer();
 
     bool open(const std::string& url);
+    bool open(const std::string& url, const NetworkConfig& config);
     void close();
 
     bool readPacket(AVPacket* packet);
@@ -30,10 +36,27 @@ public:
 
     double duration() const;
 
+    void setConnectionCallback(ConnectionCallback cb);
+    ConnectionState connectionState() const;
+
 private:
     AVFormatContext* formatCtx_ = nullptr;
     int videoStreamIndex_ = -1;
     int audioStreamIndex_ = -1;
     std::atomic<bool> opened_{false};
     std::atomic<bool> eof_{false};
+
+    NetworkConfig netConfig_;
+    ConnectionCallback connCb_;
+    std::mutex connCbMutex_;
+    std::atomic<ConnectionState> connState_{ConnectionState::Disconnected};
+    std::string currentUrl_;
+
+    bool reconnectAndRead(AVPacket* packet);
+
+    void setConnState(ConnectionState s, const std::string& msg = "") {
+        connState_ = s;
+        std::lock_guard<std::mutex> lock(connCbMutex_);
+        if (connCb_) connCb_(s, msg);
+    }
 };

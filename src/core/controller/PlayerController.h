@@ -5,10 +5,12 @@
 #include "core/common/BlockingQueue.h"
 #include "core/audio/AudioFrame.h"
 #include "core/demuxer/Demuxer.h"
+#include "core/demuxer/NetworkConfig.h"
 #include "core/decoder/IDecoder.h"
 #include "core/decoder/DecoderFactory.h"
 #include "core/renderer/IRenderer.h"
 #include "core/audio/IAudioOutput.h"
+#include "core/audio/AudioResampler.h"
 
 #include <memory>
 #include <thread>
@@ -32,6 +34,7 @@ public:
     ~PlayerController();
 
     bool open(const std::string& url);
+    bool open(const std::string& url, const NetworkConfig& config);
     void close();
 
     void play();
@@ -58,7 +61,13 @@ public:
     using ErrorCallback = std::function<void(const std::string&)>;
     void setErrorCallback(ErrorCallback cb) { errorCb_ = std::move(cb); }
 
+    using ConnectionCallback = std::function<void(ConnectionState, const std::string&)>;
+    void setConnectionCallback(ConnectionCallback cb);
+    ConnectionState connectionState() const;
+
     VideoInfo getVideoInfo() const;
+
+    bool captureFrame(const std::string& savePath);
 
     // 获取帧队列供外部消费
     BlockingQueue<VideoFrame>& videoFrameQueue() { return videoFrameQueue_; }
@@ -70,12 +79,14 @@ private:
     void audioDecodeThread();
 
     void setState(State s);
+    void initAudioResampler();
 
     std::unique_ptr<Demuxer> demuxer_;
     std::unique_ptr<IDecoder> videoDecoder_;
     std::unique_ptr<IDecoder> audioDecoder_;
     std::unique_ptr<IRenderer> renderer_;
     std::unique_ptr<IAudioOutput> audioOutput_;
+    std::unique_ptr<AudioResampler> audioResampler_;
 
     BlockingQueue<AVPacket*> videoPacketQueue_;
     BlockingQueue<AVPacket*> audioPacketQueue_;
@@ -92,6 +103,9 @@ private:
     std::atomic<double> currentPosition_{0.0};
     std::string currentUrl_;
     mutable std::mutex mutex_;
+
+    mutable std::mutex frameMutex_;
+    VideoFrame lastFrame_;
 
     FrameCallback videoFrameCb_;
     StateCallback stateCb_;

@@ -1,8 +1,23 @@
 #include "core/controller/PlayerController.h"
 
+#ifdef _WIN32
+#include "platform/windows/D3D11VAHardwareDecoder.h"
+#elif defined(__ANDROID__)
+#include "platform/android/MediaCodecDecoder.h"
+#endif
+
 extern "C" {
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
+}
+
+#ifndef STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#endif
+
+extern "C" {
+#include <libswscale/swscale.h>
 }
 
 static const size_t MAX_PACKET_QUEUE_SIZE = 500;
@@ -35,9 +50,13 @@ bool PlayerController::open(const std::string& url) {
     currentUrl_ = url;
 
     if (demuxer_->getVideoStreamIndex() >= 0) {
+        void* device = nullptr;
+        if (renderer_) device = renderer_->getNativeDevice();
+
         videoDecoder_ = DecoderFactory::createVideoDecoder(
             demuxer_->getVideoParams(),
-            DecoderFactory::DecoderType::Auto
+            DecoderFactory::DecoderType::Auto,
+            device
         );
         if (!videoDecoder_) {
             if (errorCb_) errorCb_("Failed to create video decoder");
@@ -55,6 +74,58 @@ bool PlayerController::open(const std::string& url) {
         auto* aparams = demuxer_->getAudioParams();
         audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
     }
+
+    initAudioResampler();
+
+    setState(Stopped);
+    return true;
+}
+
+bool PlayerController::open(const std::string& url, const NetworkConfig& config) {
+    // Delegate to the simple overload — Demuxer::open(url) forwards to open(url, defaultConfig)
+    // To avoid code duplication, just set config on demuxer and call the base open
+    (void)config;  // Use NetworkConfig via Demuxer directly
+    // Actually, open with specific config:
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (state_ != Idle && state_ != Stopped) {
+        close();
+    }
+
+    if (!demuxer_->open(url, config)) {
+        if (errorCb_) errorCb_("Failed to open: " + url);
+        return false;
+    }
+
+    currentUrl_ = url;
+
+    if (demuxer_->getVideoStreamIndex() >= 0) {
+        void* device = nullptr;
+        if (renderer_) device = renderer_->getNativeDevice();
+
+        videoDecoder_ = DecoderFactory::createVideoDecoder(
+            demuxer_->getVideoParams(),
+            DecoderFactory::DecoderType::Auto,
+            device
+        );
+        if (!videoDecoder_) {
+            if (errorCb_) errorCb_("Failed to create video decoder");
+            return false;
+        }
+    }
+
+    if (demuxer_->getAudioStreamIndex() >= 0) {
+        audioDecoder_ = DecoderFactory::createAudioDecoder(
+            demuxer_->getAudioParams()
+        );
+    }
+
+    if (audioOutput_ && demuxer_->getAudioStreamIndex() >= 0) {
+        auto* aparams = demuxer_->getAudioParams();
+        audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
+    }
+
+    initAudioResampler();
 
     setState(Stopped);
     return true;
@@ -145,6 +216,9 @@ void PlayerController::seek(double seconds) {
 
 void PlayerController::setSpeed(float speed) {
     speed_ = speed;
+    if (audioResampler_) {
+        audioResampler_->setSpeed(speed);
+    }
 }
 
 void PlayerController::setVolume(float volume) {
@@ -235,26 +309,50 @@ void PlayerController::videoDecodeThread() {
                 streams[demuxer_->getVideoStreamIndex()]->time_base;
             vf.pts = frame->pts * av_q2d(timeBase);
 
-            if (frame->format == AV_PIX_FMT_YUV420P) {
-                vf.format = VideoFrame::YUV420P;
-                for (int i = 0; i < 3; i++) {
-                    vf.linesize[i] = frame->linesize[i];
-                    int h = (i == 0) ? frame->height : frame->height / 2;
-                    int size = frame->linesize[i] * h;
-                    vf.data[i].assign(frame->data[i], frame->data[i] + size);
+            if (videoDecoder_->isHardware()) {
+                // Hardware decode path - NativeTexture
+                vf.format = VideoFrame::NativeTexture;
+
+#ifdef _WIN32
+                auto* d3d11dec = dynamic_cast<D3D11VAHardwareDecoder*>(videoDecoder_.get());
+                if (d3d11dec) {
+                    d3d11dec->getLastNativeTexture(vf.nativeTex);
                 }
-            } else if (frame->format == AV_PIX_FMT_NV12) {
-                vf.format = VideoFrame::NV12;
-                vf.linesize[0] = frame->linesize[0];
-                vf.linesize[1] = frame->linesize[1];
-                int ySize = frame->linesize[0] * frame->height;
-                vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
-                int uvSize = frame->linesize[1] * frame->height / 2;
-                vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+#elif defined(__ANDROID__)
+                auto* mcdec = dynamic_cast<MediaCodecDecoder*>(videoDecoder_.get());
+                if (mcdec) {
+                    mcdec->getLastNativeTexture(vf.nativeTex);
+                }
+#endif
+            } else {
+                // Software decode path - YUV data
+                if (frame->format == AV_PIX_FMT_YUV420P) {
+                    vf.format = VideoFrame::YUV420P;
+                    for (int i = 0; i < 3; i++) {
+                        vf.linesize[i] = frame->linesize[i];
+                        int h = (i == 0) ? frame->height : frame->height / 2;
+                        int size = frame->linesize[i] * h;
+                        vf.data[i].assign(frame->data[i], frame->data[i] + size);
+                    }
+                } else if (frame->format == AV_PIX_FMT_NV12) {
+                    vf.format = VideoFrame::NV12;
+                    vf.linesize[0] = frame->linesize[0];
+                    vf.linesize[1] = frame->linesize[1];
+                    int ySize = frame->linesize[0] * frame->height;
+                    vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
+                    int uvSize = frame->linesize[1] * frame->height / 2;
+                    vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+                }
             }
 
             if (videoFrameCb_) {
                 videoFrameCb_(vf);
+            }
+
+            // Cache latest frame for screenshot
+            {
+                std::lock_guard<std::mutex> lock(frameMutex_);
+                lastFrame_ = vf;
             }
 
             videoFrameQueue_.push(std::move(vf));
@@ -290,8 +388,20 @@ void PlayerController::audioDecodeThread() {
 
             int dataSize = av_samples_get_buffer_size(nullptr, af.channels, af.samples,
                 static_cast<AVSampleFormat>(frame->format), 1);
+
             if (dataSize > 0 && frame->data[0]) {
-                af.data.assign(frame->data[0], frame->data[0] + dataSize);
+                if (audioResampler_ && speed_ != 1.0f) {
+                    std::vector<uint8_t> resampled;
+                    if (audioResampler_->process(frame, resampled)) {
+                        af.data = std::move(resampled);
+                        af.samples = static_cast<int>(af.data.size()) /
+                            (af.channels * af.bytesPerSample);
+                    } else {
+                        af.data.assign(frame->data[0], frame->data[0] + dataSize);
+                    }
+                } else {
+                    af.data.assign(frame->data[0], frame->data[0] + dataSize);
+                }
                 audioFrameQueue_.push(std::move(af));
             }
         }
@@ -306,4 +416,81 @@ void PlayerController::audioDecodeThread() {
 void PlayerController::setState(State s) {
     state_ = s;
     if (stateCb_) stateCb_(s);
+}
+
+void PlayerController::setConnectionCallback(ConnectionCallback cb) {
+    if (demuxer_) {
+        demuxer_->setConnectionCallback(std::move(cb));
+    }
+}
+
+ConnectionState PlayerController::connectionState() const {
+    return demuxer_ ? demuxer_->connectionState() : ConnectionState::Disconnected;
+}
+
+void PlayerController::initAudioResampler() {
+    if (!demuxer_ || demuxer_->getAudioStreamIndex() < 0) return;
+
+    auto* aparams = demuxer_->getAudioParams();
+    if (!aparams) return;
+
+    audioResampler_ = std::make_unique<AudioResampler>();
+    if (!audioResampler_->init(
+        aparams->sample_rate,
+        aparams->ch_layout.nb_channels,
+        static_cast<AVSampleFormat>(aparams->format))) {
+        audioResampler_.reset();
+    }
+}
+
+bool PlayerController::captureFrame(const std::string& savePath) {
+    VideoFrame frame;
+    {
+        std::lock_guard<std::mutex> lock(frameMutex_);
+        if (lastFrame_.format == VideoFrame::Format::NativeTexture) {
+            // Hardware decoded frames not supported for screenshot (requires GPU readback)
+            return false;
+        }
+        frame = lastFrame_;
+    }
+
+    if (frame.width <= 0 || frame.height <= 0) return false;
+
+    // Determine source pixel format
+    AVPixelFormat srcFmt = AV_PIX_FMT_NONE;
+    if (frame.format == VideoFrame::YUV420P) {
+        srcFmt = AV_PIX_FMT_YUV420P;
+    } else if (frame.format == VideoFrame::NV12) {
+        srcFmt = AV_PIX_FMT_NV12;
+    } else {
+        return false;  // Unsupported format for screenshot
+    }
+
+    // YUV/NV12 -> RGBA
+    std::vector<uint8_t> rgbaData(frame.width * frame.height * 4);
+
+    SwsContext* swsCtx = sws_getContext(
+        frame.width, frame.height, srcFmt,
+        frame.width, frame.height, AV_PIX_FMT_RGBA,
+        SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+    if (!swsCtx) return false;
+
+    const uint8_t* srcSlice[3] = {
+        frame.data[0].data(),
+        frame.data[1].data(),
+        frame.data[2].data()
+    };
+    int srcStride[3] = { frame.linesize[0], frame.linesize[1], frame.linesize[2] };
+
+    uint8_t* dstSlice[1] = { rgbaData.data() };
+    int dstStride[1] = { frame.width * 4 };
+
+    sws_scale(swsCtx, srcSlice, srcStride, 0, frame.height, dstSlice, dstStride);
+    sws_freeContext(swsCtx);
+
+    int result = stbi_write_png(savePath.c_str(), frame.width, frame.height,
+        4, rgbaData.data(), frame.width * 4);
+
+    return result != 0;
 }

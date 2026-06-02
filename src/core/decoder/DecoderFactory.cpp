@@ -12,18 +12,20 @@ void DecoderFactory::registerHardwareCreator(HardwareCreator creator) {
 
 std::unique_ptr<IDecoder> DecoderFactory::createVideoDecoder(
     const AVCodecParameters* params,
-    DecoderType type
+    DecoderType type,
+    void* sharedDevice
 ) {
     if (type == DecoderType::Hardware || type == DecoderType::Auto) {
         auto& hwCreator = getHardwareCreator();
         if (hwCreator) {
-            auto decoder = hwCreator();
+            auto decoder = hwCreator(sharedDevice);
             if (decoder && decoder->init(params)) {
                 return decoder;
             }
         }
     }
 
+    // Fallback to software decoder
     auto decoder = std::make_unique<SoftwareDecoder>();
     if (decoder->init(params)) {
         return decoder;

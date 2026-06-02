@@ -12,6 +12,7 @@ bool D3D11Renderer::init(void* nativeWindow) {
     if (!createShaders()) return false;
     if (!createSamplerState()) return false;
     if (!createVertexBuffer()) return false;
+    if (!createNV12Shader()) return false;
 
     initialized_ = true;
     return true;
@@ -209,9 +210,99 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
     return true;
 }
 
-bool D3D11Renderer::renderTexture(void* nativeTexture, int w, int h) {
-    // 硬解纹理渲染 - 后续实现
-    return false;
+bool D3D11Renderer::renderTexture(const NativeTexture& texture) {
+    if (!initialized_) return false;
+    if (texture.type != NativeTexture::D3D11_TEXTURE || !texture.handle) return false;
+
+    auto* d3dTexture = static_cast<ID3D11Texture2D*>(texture.handle);
+    if (!createNV12SRVs(d3dTexture, texture.index, texture.width, texture.height)) return false;
+
+    float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    context_->ClearRenderTargetView(renderTargetView_.Get(), clearColor);
+    context_->OMSetRenderTargets(1, renderTargetView_.GetAddressOf(), nullptr);
+
+    ID3D11ShaderResourceView* srvs[] = { nv12YSRV_.Get(), nv12UVSRV_.Get() };
+    context_->PSSetShaderResources(0, 2, srvs);
+    context_->PSSetSamplers(0, 1, samplerState_.GetAddressOf());
+
+    context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
+    context_->PSSetShader(nv12PixelShader_.Get(), nullptr, 0);
+
+    UINT stride = sizeof(float) * 4;
+    UINT offset = 0;
+    context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
+    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    context_->Draw(4, 0);
+
+    swapChain_->Present(1, 0);
+    return true;
+}
+
+bool D3D11Renderer::createNV12Shader() {
+    const char* psSource = R"(
+        Texture2D<float> texY : register(t0);
+        Texture2D<float2> texUV : register(t1);
+        SamplerState sampler0 : register(s0);
+        struct PS_INPUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; };
+        float4 PS(PS_INPUT input) : SV_TARGET {
+            float y = texY.Sample(sampler0, input.uv);
+            float2 uv = texUV.Sample(sampler0, input.uv);
+            float u = uv.x - 0.5f;
+            float v = uv.y - 0.5f;
+            float r = y + 1.402f * v;
+            float g = y - 0.344136f * u - 0.714136f * v;
+            float b = y + 1.772f * u;
+            return float4(r, g, b, 1.0f);
+        }
+    )";
+
+    ComPtr<ID3DBlob> psBlob;
+    ComPtr<ID3DBlob> errorBlob;
+    HRESULT hr = D3DCompile(psSource, strlen(psSource), nullptr, nullptr, nullptr,
+        "PS", "ps_5_0", 0, 0, &psBlob, &errorBlob);
+    if (FAILED(hr)) return false;
+
+    return SUCCEEDED(device_->CreatePixelShader(psBlob->GetBufferPointer(),
+        psBlob->GetBufferSize(), nullptr, &nv12PixelShader_));
+}
+
+bool D3D11Renderer::createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int width, int height) {
+    if (!srcTexture) return false;
+
+    // Reuse existing SRVs if dimensions haven't changed
+    if (nv12YSRV_ && nv12UVSRV_ && width == hwTexWidth_ && height == hwTexHeight_) {
+        // Still need to update SRVs if the source texture changed
+        // For now, recreate to be safe
+    }
+    hwTexWidth_ = width;
+    hwTexHeight_ = height;
+
+    // Y plane SRV — R8_UNORM, slice [index]
+    D3D11_SHADER_RESOURCE_VIEW_DESC yDesc = {};
+    yDesc.Format = DXGI_FORMAT_R8_UNORM;
+    yDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    yDesc.Texture2DArray.MipLevels = 1;
+    yDesc.Texture2DArray.FirstArraySlice = index;
+    yDesc.Texture2DArray.ArraySize = 1;
+
+    HRESULT hr = device_->CreateShaderResourceView(srcTexture, &yDesc, &nv12YSRV_);
+    if (FAILED(hr)) return false;
+
+    // UV plane SRV — R8G8_UNORM, slice [index]
+    D3D11_SHADER_RESOURCE_VIEW_DESC uvDesc = {};
+    uvDesc.Format = DXGI_FORMAT_R8G8_UNORM;
+    uvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    uvDesc.Texture2DArray.MipLevels = 1;
+    uvDesc.Texture2DArray.FirstArraySlice = index;
+    uvDesc.Texture2DArray.ArraySize = 1;
+
+    hr = device_->CreateShaderResourceView(srcTexture, &uvDesc, &nv12UVSRV_);
+    if (FAILED(hr)) {
+        nv12YSRV_.Reset();
+        return false;
+    }
+
+    return true;
 }
 
 void D3D11Renderer::resize(int width, int height) {
@@ -226,6 +317,11 @@ void D3D11Renderer::resize(int width, int height) {
 }
 
 void D3D11Renderer::destroy() {
+    nv12UVSRV_.Reset();
+    nv12YSRV_.Reset();
+    nv12PixelShader_.Reset();
+    hwTexWidth_ = 0;
+    hwTexHeight_ = 0;
     y_SRV_.Reset(); u_SRV_.Reset(); v_SRV_.Reset();
     yTexture_.Reset(); uTexture_.Reset(); vTexture_.Reset();
     vertexBuffer_.Reset();

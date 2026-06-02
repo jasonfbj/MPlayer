@@ -24,7 +24,7 @@ set(FFMPEG_LIB_DIR "${FFMPEG_PLATFORM_DIR}/lib")
 add_library(MPlayerFFmpeg INTERFACE)
 target_include_directories(MPlayerFFmpeg INTERFACE ${FFMPEG_INCLUDE_DIR})
 
-set(FFMPEG_LIBS avcodec avformat avutil swscale swresample)
+set(FFMPEG_LIBS avcodec avformat avutil swscale swresample avfilter)
 
 if(WIN32)
     set(FFMPEG_LINK_LIBS "")
