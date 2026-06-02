@@ -1,6 +1,7 @@
 add_library(MPlayerAndroid SHARED
     jni/MPlayerJNI.cpp
     GLESRenderer.cpp
+    MediaCodecDecoder.cpp
     AndroidAudioOutput.cpp
 )
 
@@ -13,6 +14,7 @@ target_link_libraries(MPlayerAndroid PRIVATE
     EGL
     GLESv3
     OpenSLES
+    mediandk
     android
     log
 )

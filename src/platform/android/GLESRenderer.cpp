@@ -182,7 +182,16 @@ bool GLESRenderer::renderFrame(const VideoFrame& frame) {
     return true;
 }
 
-bool GLESRenderer::renderTexture(void* nativeTexture, int width, int height) {
+bool GLESRenderer::renderTexture(const NativeTexture& texture) {
+    if (!initialized_) return false;
+
+    if (texture.type == NativeTexture::ANDROID_SURFACE_DIRECT) {
+        // MediaCodec already rendered directly to Surface, just swap buffers
+        eglSwapBuffers(display_, surface_);
+        return true;
+    }
+
+    // Future: GL_TEXTURE_EXTERNAL_OES texture rendering
     return false;
 }
 

@@ -13,7 +13,7 @@ public:
 
     bool init(void* nativeWindow) override;
     bool renderFrame(const VideoFrame& frame) override;
-    bool renderTexture(void* nativeTexture, int width, int height) override;
+    bool renderTexture(const NativeTexture& texture) override;
     void resize(int width, int height) override;
     void destroy() override;
 
