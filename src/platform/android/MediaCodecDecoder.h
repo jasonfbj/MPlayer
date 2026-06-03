@@ -2,8 +2,10 @@
 
 #include "core/decoder/IDecoder.h"
 #include "core/common/NonCopyable.h"
+#include "core/common/VideoFrame.h"
 
 #include <jni.h>
+#include <android/native_window.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 
@@ -26,7 +28,7 @@ public:
 
 private:
     AMediaCodec* codec_ = nullptr;
-    jobject surface_ = nullptr;
+    ANativeWindow* nativeWindow_ = nullptr;
     JNIEnv* jniEnv_ = nullptr;
     bool configured_ = false;
     int width_ = 0;

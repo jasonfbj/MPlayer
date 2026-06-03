@@ -152,7 +152,7 @@ void MPlayerJNI::nativeSetSurface(JNIEnv* env, jobject thiz, jlong handle, jobje
     }
     g_surface = env->NewGlobalRef(surface);
 
-    DecoderFactory::registerHardwareCreator([g_surface](void*) ->
+    DecoderFactory::registerHardwareCreator([](void*) ->
         std::unique_ptr<IDecoder> {
         auto decoder = std::make_unique<MediaCodecDecoder>();
         // Get JNIEnv from cached JavaVM (thread-safe)

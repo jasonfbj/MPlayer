@@ -1,5 +1,7 @@
 #include "MediaCodecDecoder.h"
 #include <android/log.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #include <cstring>
 #include <algorithm>
 
@@ -45,8 +47,8 @@ bool MediaCodecDecoder::init(const AVCodecParameters* params) {
     }
 
     media_status_t status;
-    if (surface_) {
-        status = AMediaCodec_configure(codec_, format, surface_, nullptr, 0);
+    if (nativeWindow_) {
+        status = AMediaCodec_configure(codec_, format, nativeWindow_, nullptr, 0);
     } else {
         status = AMediaCodec_configure(codec_, format, nullptr, nullptr, 0);
     }
@@ -88,7 +90,7 @@ bool MediaCodecDecoder::decode(const AVPacket* packet, AVFrame* frame) {
     ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec_, &info, 5000);
     if (outputIndex < 0) return false;
 
-    bool render = (surface_ != nullptr);
+    bool render = (nativeWindow_ != nullptr);
     AMediaCodec_releaseOutputBuffer(codec_, outputIndex, render);
 
     frame->width = width_;
@@ -112,6 +114,10 @@ void MediaCodecDecoder::destroy() {
         AMediaCodec_delete(codec_);
         codec_ = nullptr;
     }
+    if (nativeWindow_) {
+        ANativeWindow_release(nativeWindow_);
+        nativeWindow_ = nullptr;
+    }
     configured_ = false;
 }
 
@@ -133,5 +139,11 @@ bool MediaCodecDecoder::getLastNativeTexture(NativeTexture& tex) const {
 }
 
 void MediaCodecDecoder::setSurface(jobject surface) {
-    surface_ = surface;
+    if (nativeWindow_) {
+        ANativeWindow_release(nativeWindow_);
+        nativeWindow_ = nullptr;
+    }
+    if (jniEnv_ && surface) {
+        nativeWindow_ = ANativeWindow_fromSurface(jniEnv_, surface);
+    }
 }
