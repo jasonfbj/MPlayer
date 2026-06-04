@@ -152,6 +152,16 @@ bool D3D11Renderer::createVertexBuffer() {
 bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
     if (!initialized_ || frame.format == VideoFrame::NativeTexture) return false;
 
+    // Validate frame data before rendering
+    if (frame.width <= 0 || frame.height <= 0) return false;
+    if (frame.format == VideoFrame::YUV420P) {
+        if (frame.data[0].empty() || frame.data[1].empty() || frame.data[2].empty())
+            return false;
+    } else if (frame.format == VideoFrame::NV12) {
+        if (frame.data[0].empty() || frame.data[1].empty())
+            return false;
+    }
+
     auto createOrUpdateTexture = [&](ComPtr<ID3D11Texture2D>& tex,
                                      ComPtr<ID3D11ShaderResourceView>& srv,
                                      const uint8_t* data, int width, int height) {
@@ -306,14 +316,17 @@ bool D3D11Renderer::createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int w
 }
 
 void D3D11Renderer::resize(int width, int height) {
+    if (!initialized_) return;
     if (width == width_ && height == height_) return;
+    if (width <= 0 || height <= 0) return;
 
     renderTargetView_.Reset();
-    swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
-    createRenderTargetView();
-
-    width_ = width;
-    height_ = height;
+    HRESULT hr = swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+    if (SUCCEEDED(hr)) {
+        createRenderTargetView();
+        width_ = width;
+        height_ = height;
+    }
 }
 
 void D3D11Renderer::destroy() {

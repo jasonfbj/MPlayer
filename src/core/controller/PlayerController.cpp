@@ -300,7 +300,7 @@ void PlayerController::videoDecodeThread() {
             continue;
         }
 
-        if (videoDecoder_->decode(packet, frame)) {
+        if (videoDecoder_ && videoDecoder_->decode(packet, frame)) {
             VideoFrame vf;
             vf.width = frame->width;
             vf.height = frame->height;
@@ -326,7 +326,8 @@ void PlayerController::videoDecodeThread() {
 #endif
             } else {
                 // Software decode path - YUV data
-                if (frame->format == AV_PIX_FMT_YUV420P) {
+                AVPixelFormat fmt = static_cast<AVPixelFormat>(frame->format);
+                if (fmt == AV_PIX_FMT_YUV420P || fmt == AV_PIX_FMT_YUVJ420P) {
                     vf.format = VideoFrame::YUV420P;
                     for (int i = 0; i < 3; i++) {
                         vf.linesize[i] = frame->linesize[i];
@@ -334,7 +335,7 @@ void PlayerController::videoDecodeThread() {
                         int size = frame->linesize[i] * h;
                         vf.data[i].assign(frame->data[i], frame->data[i] + size);
                     }
-                } else if (frame->format == AV_PIX_FMT_NV12) {
+                } else if (fmt == AV_PIX_FMT_NV12) {
                     vf.format = VideoFrame::NV12;
                     vf.linesize[0] = frame->linesize[0];
                     vf.linesize[1] = frame->linesize[1];
@@ -342,6 +343,31 @@ void PlayerController::videoDecodeThread() {
                     vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
                     int uvSize = frame->linesize[1] * frame->height / 2;
                     vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+                } else if (fmt == AV_PIX_FMT_YUV422P || fmt == AV_PIX_FMT_YUVJ422P) {
+                    // Treat 422 as 420 — copy only top-half rows for U/V
+                    vf.format = VideoFrame::YUV420P;
+                    vf.linesize[0] = frame->linesize[0];
+                    vf.data[0].assign(frame->data[0], frame->data[0] + frame->linesize[0] * frame->height);
+                    int halfH = frame->height / 2;
+                    vf.linesize[1] = frame->linesize[1];
+                    vf.data[1].resize(frame->linesize[1] * halfH);
+                    for (int y = 0; y < halfH; y++) {
+                        memcpy(vf.data[1].data() + y * frame->linesize[1],
+                               frame->data[1] + y * 2 * frame->linesize[1],
+                               frame->linesize[1]);
+                    }
+                    vf.linesize[2] = frame->linesize[2];
+                    vf.data[2].resize(frame->linesize[2] * halfH);
+                    for (int y = 0; y < halfH; y++) {
+                        memcpy(vf.data[2].data() + y * frame->linesize[2],
+                               frame->data[2] + y * 2 * frame->linesize[2],
+                               frame->linesize[2]);
+                    }
+                } else {
+                    // Unsupported format — skip this frame
+                    av_packet_free(&packet);
+                    av_frame_unref(frame);
+                    continue;
                 }
             }
 

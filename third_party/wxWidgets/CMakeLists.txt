@@ -8,11 +8,15 @@ endif()
 set(WXWIDGETS_PLATFORM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/windows/x64")
 
 set(WXWIDGETS_INCLUDE_DIR "${WXWIDGETS_PLATFORM_DIR}/include")
+set(WXWIDGETS_INCLUDE_DIR_MSVC "${WXWIDGETS_PLATFORM_DIR}/include/msvc")
 set(WXWIDGETS_LIB_DIR "${WXWIDGETS_PLATFORM_DIR}/lib/vc_x64_lib")
 
 # 导入 wxWidgets 作为 interface library
 add_library(MPlayerWxWidgets INTERFACE IMPORTED)
-target_include_directories(MPlayerWxWidgets INTERFACE ${WXWIDGETS_INCLUDE_DIR})
+target_include_directories(MPlayerWxWidgets INTERFACE
+    ${WXWIDGETS_INCLUDE_DIR}
+    ${WXWIDGETS_INCLUDE_DIR_MSVC}
+)
 
 # wxWidgets 3.2.8 静态链接需要的库（Conan x86_64 静态编译）
 set(WXWIDGETS_LIBS

@@ -9,6 +9,7 @@ option(BUILD_TESTS "Build tests" OFF)
 option(ENABLE_HARDWARE_DECODER "Enable hardware decoder" ON)
 
 add_subdirectory(third_party/ffmpeg)
+add_subdirectory(third_party/wxWidgets)
 add_subdirectory(src/core)
 
 if(WIN32)

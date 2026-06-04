@@ -36,3 +36,4 @@ local.properties
 *.dll
 *.so
 *.exe
+src/platform/windows/.claude/

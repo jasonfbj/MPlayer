@@ -45,6 +45,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         std::queue<T> empty;
         queue_.swap(empty);
+        finished_ = false;  // Reset so the queue can be reused after close()
     }
 
     bool isEmpty() const {
