@@ -6,6 +6,7 @@
 
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <mutex>
 
 class D3D11VAHardwareDecoder : public IDecoder, public NonCopyable {
 public:
@@ -22,6 +23,7 @@ public:
 
     // Shared device from renderer — gets context internally via GetImmediateContext
     void setSharedDevice(ID3D11Device* device);
+    void setContextMutex(std::mutex* mtx) { contextMutex_ = mtx; }
     bool getLastNativeTexture(NativeTexture& tex) const;
 
     ID3D11Texture2D* getLastDecodedTexture() const { return lastTexture_.Get(); }
@@ -39,4 +41,7 @@ private:
     int lastIndex_ = 0;
     int lastWidth_ = 0;
     int lastHeight_ = 0;
+
+    // Pointer to renderer's mutex — shared for D3D11 context synchronization
+    std::mutex* contextMutex_ = nullptr;
 };

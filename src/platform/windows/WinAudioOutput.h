@@ -31,6 +31,7 @@ private:
 
     std::thread thread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> initialized_{false};
     AudioCallback callback_;
 
     int sampleRate_ = 0;

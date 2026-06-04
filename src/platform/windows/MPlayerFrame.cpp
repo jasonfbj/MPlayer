@@ -37,12 +37,17 @@ MPlayerFrame::MPlayerFrame()
     player_->setAudioOutput(std::move(audio));
 
     // Register hardware decoder factory
-    DecoderFactory::registerHardwareCreator([](void* sharedDevice) ->
+    DecoderFactory::registerHardwareCreator([this](void* sharedDevice) ->
         std::unique_ptr<IDecoder> {
         auto decoder = std::make_unique<D3D11VAHardwareDecoder>();
         if (sharedDevice) {
             auto* dev = static_cast<ID3D11Device*>(sharedDevice);
             decoder->setSharedDevice(dev);
+        }
+        // Share the renderer's mutex so FFmpeg D3D11VA and renderer
+        // synchronize access to the same ID3D11DeviceContext
+        if (renderer_) {
+            decoder->setContextMutex(&renderer_->contextMutex());
         }
         return decoder;
     });

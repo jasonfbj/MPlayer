@@ -48,11 +48,13 @@ bool WinAudioOutput::init(int sampleRate, int channels, int bytesPerSample) {
     audioClient_->GetService(__uuidof(IAudioStreamVolume),
         reinterpret_cast<void**>(&streamVolume_));
 
+    initialized_ = true;
     return true;
 }
 
 bool WinAudioOutput::start() {
     if (running_) return true;
+    if (!initialized_) return true;  // Not initialized (e.g. no audio stream) — skip
 
     running_ = true;
     thread_ = std::thread(&WinAudioOutput::audioThread, this);

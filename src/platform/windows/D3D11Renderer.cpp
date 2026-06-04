@@ -162,6 +162,8 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
             return false;
     }
 
+    std::lock_guard<std::mutex> lock(contextMutex_);
+
     auto createOrUpdateTexture = [&](ComPtr<ID3D11Texture2D>& tex,
                                      ComPtr<ID3D11ShaderResourceView>& srv,
                                      const uint8_t* data, int width, int height) {
@@ -223,6 +225,8 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
 bool D3D11Renderer::renderTexture(const NativeTexture& texture) {
     if (!initialized_) return false;
     if (texture.type != NativeTexture::D3D11_TEXTURE || !texture.handle) return false;
+
+    std::lock_guard<std::mutex> lock(contextMutex_);
 
     auto* d3dTexture = static_cast<ID3D11Texture2D*>(texture.handle);
     if (!createNV12SRVs(d3dTexture, texture.index, texture.width, texture.height)) return false;
@@ -319,6 +323,8 @@ void D3D11Renderer::resize(int width, int height) {
     if (!initialized_) return;
     if (width == width_ && height == height_) return;
     if (width <= 0 || height <= 0) return;
+
+    std::lock_guard<std::mutex> lock(contextMutex_);
 
     renderTargetView_.Reset();
     HRESULT hr = swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);

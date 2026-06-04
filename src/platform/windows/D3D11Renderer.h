@@ -6,6 +6,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <wrl/client.h>
+#include <mutex>
 
 using Microsoft::WRL::ComPtr;
 
@@ -22,6 +23,9 @@ public:
 
     void* getNativeDevice() const override { return device_.Get(); }
     void* getNativeDeviceContext() const override { return context_.Get(); }
+
+    // Mutex for synchronizing D3D11 immediate context access with hardware decoder
+    std::mutex& contextMutex() { return contextMutex_; }
 
 private:
     bool createDevice();
@@ -59,4 +63,7 @@ private:
     ComPtr<ID3D11ShaderResourceView> nv12UVSRV_;
     int hwTexWidth_ = 0;
     int hwTexHeight_ = 0;
+
+    // Mutex shared with D3D11VA hardware decoder for context synchronization
+    std::mutex contextMutex_;
 };

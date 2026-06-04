@@ -336,13 +336,36 @@ void PlayerController::videoDecodeThread() {
                         vf.data[i].assign(frame->data[i], frame->data[i] + size);
                     }
                 } else if (fmt == AV_PIX_FMT_NV12) {
-                    vf.format = VideoFrame::NV12;
-                    vf.linesize[0] = frame->linesize[0];
-                    vf.linesize[1] = frame->linesize[1];
-                    int ySize = frame->linesize[0] * frame->height;
-                    vf.data[0].assign(frame->data[0], frame->data[0] + ySize);
-                    int uvSize = frame->linesize[1] * frame->height / 2;
-                    vf.data[1].assign(frame->data[1], frame->data[1] + uvSize);
+                    // Convert NV12 to YUV420P so the renderer can handle it
+                    // (renderer only supports YUV420P for software decode path)
+                    vf.format = VideoFrame::YUV420P;
+                    vf.linesize[0] = frame->width;
+                    vf.linesize[1] = frame->width / 2;
+                    vf.linesize[2] = frame->width / 2;
+
+                    int halfH = frame->height / 2;
+
+                    // Copy Y plane (tight packing)
+                    vf.data[0].resize(frame->width * frame->height);
+                    for (int y = 0; y < frame->height; y++) {
+                        memcpy(vf.data[0].data() + y * frame->width,
+                               frame->data[0] + y * frame->linesize[0],
+                               frame->width);
+                    }
+
+                    // De-interleave UV plane into separate U and V planes
+                    vf.data[1].resize((frame->width / 2) * halfH);
+                    vf.data[2].resize((frame->width / 2) * halfH);
+                    int uvLinesize = frame->linesize[1];
+                    for (int y = 0; y < halfH; y++) {
+                        const uint8_t* uvRow = frame->data[1] + y * uvLinesize;
+                        uint8_t* uRow = vf.data[1].data() + y * (frame->width / 2);
+                        uint8_t* vRow = vf.data[2].data() + y * (frame->width / 2);
+                        for (int x = 0; x < frame->width / 2; x++) {
+                            uRow[x] = uvRow[x * 2];
+                            vRow[x] = uvRow[x * 2 + 1];
+                        }
+                    }
                 } else if (fmt == AV_PIX_FMT_YUV422P || fmt == AV_PIX_FMT_YUVJ422P) {
                     // Treat 422 as 420 — copy only top-half rows for U/V
                     vf.format = VideoFrame::YUV420P;

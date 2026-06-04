@@ -53,9 +53,13 @@ bool D3D11VAHardwareDecoder::init(const AVCodecParameters* params) {
         sharedContext_->AddRef();
         d3d11Ctx->device = sharedDevice_.Get();
         d3d11Ctx->device_context = sharedContext_.Get();
-        d3d11Ctx->lock_ctx = nullptr;
-        d3d11Ctx->lock = nullptr;
-        d3d11Ctx->unlock = nullptr;
+        d3d11Ctx->lock_ctx = contextMutex_;
+        d3d11Ctx->lock = [](void* lock_ctx) {
+            static_cast<std::mutex*>(lock_ctx)->lock();
+        };
+        d3d11Ctx->unlock = [](void* lock_ctx) {
+            static_cast<std::mutex*>(lock_ctx)->unlock();
+        };
 
         if (av_hwdevice_ctx_init(hwDeviceCtx_) < 0) {
             destroy();
