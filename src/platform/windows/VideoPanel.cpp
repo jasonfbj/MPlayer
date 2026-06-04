@@ -74,7 +74,7 @@ void VideoPanel::onPaint(wxPaintEvent&) {
 }
 
 void VideoPanel::onEraseBackground(wxEraseEvent&) {
-    // Prevent flicker — D3D11 handles the background
+    // Prevent flicker - D3D11 handles background
 }
 
 void VideoPanel::onSize(wxSizeEvent& event) {

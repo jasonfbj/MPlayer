@@ -300,7 +300,7 @@ void PlayerController::videoDecodeThread() {
             continue;
         }
 
-        if (videoDecoder_ && videoDecoder_->decode(packet, frame)) {
+        if (videoDecoder_->decode(packet, frame)) {
             VideoFrame vf;
             vf.width = frame->width;
             vf.height = frame->height;

@@ -67,7 +67,7 @@ MPlayerFrame::MPlayerFrame()
     createMenuBar();
     createLayout();
 
-    // Create update timer (30ms ≈ 33fps for UI updates)
+    // Create update timer (30ms = ~33fps for UI updates)
     updateTimer_ = new wxTimer(this, ID_TIMER_UPDATE);
     updateTimer_->Start(30);
 
@@ -252,12 +252,16 @@ bool MPlayerFrame::isPlaying() const {
 }
 
 void MPlayerFrame::onTimer(wxTimerEvent&) {
+    // Drive video rendering
     if (videoPanel_) {
         videoPanel_->renderFrame();
     }
+
+    // Update UI controls
     if (controlPanel_) {
         controlPanel_->updateUI();
     }
+
     updateStatusBar();
 }
 
