@@ -17,9 +17,8 @@ wxBEGIN_EVENT_TABLE(ControlPanel, wxPanel)
     EVT_BUTTON(ID_PLAY_PAUSE, ControlPanel::onPlayPause)
     EVT_BUTTON(ID_STOP, ControlPanel::onStop)
     EVT_BUTTON(ID_OPEN_FILE_BTN, ControlPanel::onFileOpen)
-    EVT_COMMAND_SCROLL(ID_SEEK_SLIDER, ControlPanel::onSeek)
-    EVT_COMMAND_SCROLL_THUMBRELEASE(ID_SEEK_SLIDER,
-                                     ControlPanel::onSeekRelease)
+    EVT_COMMAND_SCROLL(ID_SEEK_SLIDER, ControlPanel::onSeekDrag)
+    EVT_SLIDER(ID_SEEK_SLIDER, ControlPanel::onSeekCommit)
     EVT_COMMAND_SCROLL(ID_VOLUME_SLIDER, ControlPanel::onVolumeChange)
     EVT_COMBOBOX(ID_SPEED_COMBO, ControlPanel::onSpeedChange)
     EVT_TEXT_ENTER(ID_RTMP_INPUT, ControlPanel::onRtmpConnect)
@@ -167,12 +166,29 @@ void ControlPanel::onFileOpen(wxCommandEvent&) {
     frame_->openFile();
 }
 
-void ControlPanel::onSeek(wxScrollEvent&) {
+void ControlPanel::onSeekDrag(wxScrollEvent&) {
+    // Fires continuously while dragging the thumb, and once on track click.
+    // Just set the flag to prevent updateUI from overwriting slider position.
+    // Update the time label to show the hovered position.
     seeking_ = true;
+
+    int pos = seekSlider_->GetValue();
+    auto* player = frame_->player();
+    if (player && player->duration() > 0) {
+        double seekTarget = (static_cast<double>(pos) / seekSlider_->GetMax()) *
+                            player->duration();
+        int tMin = static_cast<int>(seekTarget) / 60;
+        int tSec = static_cast<int>(seekTarget) % 60;
+        int dMin = static_cast<int>(player->duration()) / 60;
+        int dSec = static_cast<int>(player->duration()) % 60;
+        timeLabel_->SetLabel(wxString::Format("%02d:%02d / %02d:%02d",
+                                               tMin, tSec, dMin, dSec));
+    }
 }
 
-void ControlPanel::onSeekRelease(wxScrollEvent&) {
-    if (!seeking_) return;
+void ControlPanel::onSeekCommit(wxCommandEvent&) {
+    // EVT_SLIDER fires on both track clicks and thumb release — NOT during drag.
+    // This is the reliable cross-platform way to handle slider value changes.
     seeking_ = false;
 
     int pos = seekSlider_->GetValue();

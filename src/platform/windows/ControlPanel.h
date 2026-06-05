@@ -31,8 +31,8 @@ private:
 
     void onPlayPause(wxCommandEvent& event);
     void onStop(wxCommandEvent& event);
-    void onSeek(wxScrollEvent& event);
-    void onSeekRelease(wxScrollEvent& event);
+    void onSeekDrag(wxScrollEvent& event);
+    void onSeekCommit(wxCommandEvent& event);
     void onVolumeChange(wxScrollEvent& event);
     void onSpeedChange(wxCommandEvent& event);
     void onRtmpConnect(wxCommandEvent& event);
