@@ -54,6 +54,8 @@ private:
     ComPtr<ID3D11ShaderResourceView> y_SRV_;
     ComPtr<ID3D11ShaderResourceView> u_SRV_;
     ComPtr<ID3D11ShaderResourceView> v_SRV_;
+    int swTexWidth_ = 0;
+    int swTexHeight_ = 0;
 
     int width_ = 0;
     int height_ = 0;

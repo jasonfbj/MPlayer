@@ -182,19 +182,20 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
 
     // Validate frame data before rendering
     if (frame.width <= 0 || frame.height <= 0) return false;
-    if (frame.format == VideoFrame::YUV420P) {
-        if (frame.data[0].empty() || frame.data[1].empty() || frame.data[2].empty())
-            return false;
-    } else if (frame.format == VideoFrame::NV12) {
-        if (frame.data[0].empty() || frame.data[1].empty())
-            return false;
-    }
+    if (frame.format != VideoFrame::YUV420P) return false;
+    if (frame.data[0].empty() || frame.data[1].empty() || frame.data[2].empty())
+        return false;
 
     std::lock_guard<std::mutex> lock(contextMutex_);
 
     auto createOrUpdateTexture = [&](ComPtr<ID3D11Texture2D>& tex,
                                      ComPtr<ID3D11ShaderResourceView>& srv,
                                      const uint8_t* data, int width, int height) {
+        // Recreate texture if dimensions changed
+        if (tex && (swTexWidth_ != frame.width || swTexHeight_ != frame.height)) {
+            tex.Reset();
+            srv.Reset();
+        }
         if (!tex) {
             D3D11_TEXTURE2D_DESC desc = {};
             desc.Width = width;
@@ -209,6 +210,8 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
 
             if (FAILED(device_->CreateTexture2D(&desc, nullptr, &tex))) return false;
             if (FAILED(device_->CreateShaderResourceView(tex.Get(), nullptr, &srv))) return false;
+            swTexWidth_ = frame.width;
+            swTexHeight_ = frame.height;
         }
 
         D3D11_MAPPED_SUBRESOURCE mapped;
@@ -377,6 +380,7 @@ void D3D11Renderer::resize(int width, int height) {
 }
 
 void D3D11Renderer::destroy() {
+    std::lock_guard<std::mutex> lock(contextMutex_);
     nv12UVSRV_.Reset();
     nv12YSRV_.Reset();
     hwCopyTexture_.Reset();
@@ -384,6 +388,8 @@ void D3D11Renderer::destroy() {
     inputLayout_.Reset();
     hwTexWidth_ = 0;
     hwTexHeight_ = 0;
+    swTexWidth_ = 0;
+    swTexHeight_ = 0;
     y_SRV_.Reset(); u_SRV_.Reset(); v_SRV_.Reset();
     yTexture_.Reset(); uTexture_.Reset(); vTexture_.Reset();
     vertexBuffer_.Reset();
