@@ -315,11 +315,11 @@ VideoInfo PlayerController::getVideoInfo() const {
 void PlayerController::readThread() {
     AVPacket* packet = av_packet_alloc();
     while (running_) {
-        // Wait here while paused
+        // Wait here while paused. Wake when: not paused, or seek requested, or stopping.
         {
             std::unique_lock<std::mutex> lock(pauseMutex_);
             pauseCond_.wait(lock, [this] {
-                return (!paused_.load() && !seekRequested_.load()) || !running_.load();
+                return !paused_.load() || seekRequested_.load() || !running_.load();
             });
         }
         if (!running_) break;
@@ -339,14 +339,23 @@ void PlayerController::readThread() {
         if (packet->stream_index == demuxer_->getVideoStreamIndex()) {
             AVPacket* pkt = av_packet_alloc();
             av_packet_ref(pkt, packet);
-            if (!videoPacketQueue_.push(pkt)) {
+            // If queue is full, wait briefly for decode threads to consume
+            while (running_ && !videoPacketQueue_.push(pkt)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            if (!running_) {
                 av_packet_free(&pkt);
+                break;
             }
         } else if (packet->stream_index == demuxer_->getAudioStreamIndex()) {
             AVPacket* pkt = av_packet_alloc();
             av_packet_ref(pkt, packet);
-            if (!audioPacketQueue_.push(pkt)) {
+            while (running_ && !audioPacketQueue_.push(pkt)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            if (!running_) {
                 av_packet_free(&pkt);
+                break;
             }
         }
 
