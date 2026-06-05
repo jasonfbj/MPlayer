@@ -118,6 +118,11 @@ private:
     // When set, decode threads will pause after processing the seek target
     std::atomic<bool> seekPauseAfterDecode_{false};
 
+    // Flush request flags: set by seek(), handled by decode threads themselves
+    // to avoid concurrent AVCodecContext access (not thread-safe in FFmpeg)
+    std::atomic<bool> videoFlushRequested_{false};
+    std::atomic<bool> audioFlushRequested_{false};
+
     std::atomic<State> state_{Idle};
     std::atomic<float> speed_{1.0f};
     std::atomic<double> currentPosition_{0.0};

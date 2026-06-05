@@ -235,21 +235,37 @@ void PlayerController::seek(double seconds) {
     if (!demuxer_->isOpened()) return;
     if (state_ != Playing && state_ != Paused) return;
 
-    // Clear queues to discard stale data
+    // Drain and free AVPacket* from packet queues to avoid leaks.
+    // Frame queues hold values (not raw pointers) so clear() is fine.
+    {
+        AVPacket* pkt = nullptr;
+        while (videoPacketQueue_.pop(pkt, 0)) {
+            av_packet_free(&pkt);
+        }
+    }
+    {
+        AVPacket* pkt = nullptr;
+        while (audioPacketQueue_.pop(pkt, 0)) {
+            av_packet_free(&pkt);
+        }
+    }
     videoPacketQueue_.clear();
     audioPacketQueue_.clear();
     videoFrameQueue_.clear();
     audioFrameQueue_.clear();
 
-    if (videoDecoder_) videoDecoder_->flush();
-    if (audioDecoder_) audioDecoder_->flush();
+    // Request flush on decode threads — do NOT call flush() directly here
+    // because AVCodecContext is not thread-safe (decode threads may be in
+    // avcodec_send_packet / avcodec_receive_frame concurrently).
+    if (videoDecoder_) videoFlushRequested_ = true;
+    if (audioDecoder_) audioFlushRequested_ = true;
 
     // Request seek on readThread — avoids blocking main thread on network I/O
     seekTarget_ = seconds;
     seekRequested_ = true;
     currentPosition_ = seconds;
 
-    // Wake readThread from pause or blocked state to process the seek
+    // Wake all threads to process the seek + flush
     pauseCond_.notify_all();
 
     // If currently paused, briefly unpause to decode the seek target frame,
@@ -383,6 +399,12 @@ void PlayerController::videoDecodeThread() {
             pauseCond_.wait(lock, [this] { return !paused_.load() || !running_.load(); });
         }
         if (!running_) break;
+
+        // Handle flush request on this thread — AVCodecContext is NOT thread-safe,
+        // so flush must happen on the same thread as decode().
+        if (videoFlushRequested_.exchange(false)) {
+            if (videoDecoder_) videoDecoder_->flush();
+        }
 
         if (!videoPacketQueue_.pop(packet, 100)) {
             // Packet queue finished (EOF) — exit decode loop
@@ -556,6 +578,11 @@ void PlayerController::audioDecodeThread() {
             pauseCond_.wait(lock, [this] { return !paused_.load() || !running_.load(); });
         }
         if (!running_) break;
+
+        // Handle flush request on this thread — AVCodecContext is NOT thread-safe
+        if (audioFlushRequested_.exchange(false)) {
+            if (audioDecoder_) audioDecoder_->flush();
+        }
 
         if (!audioPacketQueue_.pop(packet, 100)) {
             // Packet queue finished (EOF) — exit decode loop
