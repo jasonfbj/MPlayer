@@ -104,7 +104,10 @@ bool D3D11VAHardwareDecoder::decode(const AVPacket* packet, AVFrame* frame) {
     if (ret < 0) return false;
 
     if (frame->format == AV_PIX_FMT_D3D11) {
-        auto* desc = reinterpret_cast<AVD3D11FrameDescriptor*>(frame->data[0]);
+        // AVD3D11FrameDescriptor lives in the buffer's data, NOT in frame->data[0].
+        // frame->data[0] points directly to the ID3D11Texture2D — using it as a
+        // descriptor would misinterpret the vtable pointer as a texture handle.
+        auto* desc = reinterpret_cast<AVD3D11FrameDescriptor*>(frame->buf[0]->data);
         if (desc && desc->texture) {
             lastTexture_ = desc->texture;
             lastIndex_ = desc->index;
