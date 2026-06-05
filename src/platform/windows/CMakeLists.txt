@@ -10,10 +10,14 @@ add_executable(MPlayerWin WIN32
 )
 
 # wxWidgets paths
-set(WXWIDGETS_ROOT "${CMAKE_SOURCE_DIR}/third_party/wxWidgets/windows/x64")
-set(WXWIDGETS_INCLUDE_DIR "${WXWIDGETS_ROOT}/include")
-set(WXWIDGETS_INCLUDE_DIR_MSVC "${WXWIDGETS_ROOT}/include/msvc")
-set(WXWIDGETS_LIB_DIR "${WXWIDGETS_ROOT}/lib/vc_x64_lib")
+# Release: bundled in third_party; Debug: from Conan cache
+set(WXWIDGETS_RELEASE_ROOT "${CMAKE_SOURCE_DIR}/third_party/wxWidgets/windows/x64")
+set(WXWIDGETS_DEBUG_ROOT "H:/conan_data/data/wxWidgets/3.2.8/1602/dev/package/8cf01e2f50fcd6b63525e70584df0326550364e1")
+
+# Use generator expressions to pick the right paths per config
+set(WXWIDGETS_INCLUDE_DIR "$<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/include")
+set(WXWIDGETS_INCLUDE_DIR_MSVC "$<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/include/msvc")
+set(WXWIDGETS_LIB_DIR "$<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib")
 
 target_include_directories(MPlayerWin PRIVATE
     ${WXWIDGETS_INCLUDE_DIR}
@@ -22,15 +26,15 @@ target_include_directories(MPlayerWin PRIVATE
 
 target_link_libraries(MPlayerWin PRIVATE
     MPlayerCore
-    # wxWidgets static libraries
-    ${WXWIDGETS_LIB_DIR}/wxmsw32u_core.lib
-    ${WXWIDGETS_LIB_DIR}/wxbase32u.lib
-    ${WXWIDGETS_LIB_DIR}/wxregexu.lib
-    ${WXWIDGETS_LIB_DIR}/wxexpat.lib
-    ${WXWIDGETS_LIB_DIR}/wxpng.lib
-    ${WXWIDGETS_LIB_DIR}/wxzlib.lib
-    ${WXWIDGETS_LIB_DIR}/wxjpeg.lib
-    ${WXWIDGETS_LIB_DIR}/wxtiff.lib
+    # wxWidgets static libraries (Release: wx*32u, Debug: wx*32ud)
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxmsw32ud_core,wxmsw32u_core>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxbase32ud,wxbase32u>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxregexud,wxregexu>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxexpatd,wxexpat>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxpngd,wxpng>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxzlibd,wxzlib>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxjpegd,wxjpeg>.lib
+    $<IF:$<CONFIG:Debug>,${WXWIDGETS_DEBUG_ROOT},${WXWIDGETS_RELEASE_ROOT}>/lib/vc_x64_lib/$<IF:$<CONFIG:Debug>,wxtiffd,wxtiff>.lib
     # D3D11
     d3d11
     dxgi
