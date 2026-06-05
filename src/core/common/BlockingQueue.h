@@ -69,6 +69,11 @@ public:
         not_empty_.notify_all();
     }
 
+    bool isFinished() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return finished_ && queue_.empty();
+    }
+
 private:
     mutable std::mutex mutex_;
     std::condition_variable not_empty_;

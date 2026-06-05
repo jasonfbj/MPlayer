@@ -6,6 +6,8 @@ bool D3D11Renderer::init(void* nativeWindow) {
     HWND hwnd = static_cast<HWND>(nativeWindow);
     if (!hwnd) return false;
 
+    hwnd_ = hwnd;
+
     if (!createDevice()) return false;
     if (!createSwapChain(hwnd)) return false;
     if (!createRenderTargetView()) return false;
@@ -186,7 +188,7 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
     if (frame.data[0].empty() || frame.data[1].empty() || frame.data[2].empty())
         return false;
 
-    std::lock_guard<std::mutex> lock(contextMutex_);
+    std::unique_lock<std::mutex> lock(contextMutex_);
 
     auto createOrUpdateTexture = [&](ComPtr<ID3D11Texture2D>& tex,
                                      ComPtr<ID3D11ShaderResourceView>& srv,
@@ -246,7 +248,12 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
     setupDrawState();
     context_->Draw(4, 0);
 
-    swapChain_->Present(1, 0);
+    HRESULT hr = swapChain_->Present(1, 0);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        lock.unlock();
+        handleDeviceLost();
+        return false;
+    }
     return true;
 }
 
@@ -254,7 +261,7 @@ bool D3D11Renderer::renderTexture(const NativeTexture& texture) {
     if (!initialized_) return false;
     if (texture.type != NativeTexture::D3D11_TEXTURE || !texture.handle) return false;
 
-    std::lock_guard<std::mutex> lock(contextMutex_);
+    std::unique_lock<std::mutex> lock(contextMutex_);
 
     auto* d3dTexture = static_cast<ID3D11Texture2D*>(texture.handle);
     if (!createNV12SRVs(d3dTexture, texture.index, texture.width, texture.height)) return false;
@@ -273,7 +280,26 @@ bool D3D11Renderer::renderTexture(const NativeTexture& texture) {
     setupDrawState();
     context_->Draw(4, 0);
 
-    swapChain_->Present(1, 0);
+    HRESULT hr = swapChain_->Present(1, 0);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        lock.unlock();
+        handleDeviceLost();
+        return false;
+    }
+    return true;
+}
+
+bool D3D11Renderer::handleDeviceLost() {
+    // Caller has already released contextMutex_ before calling us.
+    // destroyResources() does NOT lock — it just releases GPU resources.
+    destroyResources();
+    if (!hwnd_) return false;
+    if (!init(hwnd_)) return false;
+
+    // Notify consumers (e.g. hardware decoder) that the device was recreated
+    if (deviceRestoredCb_) {
+        deviceRestoredCb_(device_.Get());
+    }
     return true;
 }
 
@@ -365,13 +391,19 @@ bool D3D11Renderer::createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int w
 
 void D3D11Renderer::resize(int width, int height) {
     if (!initialized_) return;
-    if (width == width_ && height == height_) return;
     if (width <= 0 || height <= 0) return;
+    if (width == width_ && height == height_) return;
 
     std::lock_guard<std::mutex> lock(contextMutex_);
 
     renderTargetView_.Reset();
     HRESULT hr = swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+        // Device lost — update dimensions so handleDeviceLost uses correct size
+        width_ = width;
+        height_ = height;
+        return;
+    }
     if (SUCCEEDED(hr)) {
         createRenderTargetView();
         width_ = width;
@@ -381,6 +413,10 @@ void D3D11Renderer::resize(int width, int height) {
 
 void D3D11Renderer::destroy() {
     std::lock_guard<std::mutex> lock(contextMutex_);
+    destroyResources();
+}
+
+void D3D11Renderer::destroyResources() {
     nv12UVSRV_.Reset();
     nv12YSRV_.Reset();
     hwCopyTexture_.Reset();

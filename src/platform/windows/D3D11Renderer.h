@@ -7,6 +7,7 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 #include <mutex>
+#include <functional>
 
 using Microsoft::WRL::ComPtr;
 
@@ -27,6 +28,14 @@ public:
     // Mutex for synchronizing D3D11 immediate context access with hardware decoder
     std::mutex& contextMutex() { return contextMutex_; }
 
+    // Check and handle device removed/reset after Present
+    bool handleDeviceLost();
+
+    // Set callback to invoke when D3D11 device is recreated after device lost.
+    // The callback receives the new ID3D11Device* so consumers (e.g. hardware decoder) can update.
+    using DeviceRestoredCallback = std::function<void(void* newDevice)>;
+    void setDeviceRestoredCallback(DeviceRestoredCallback cb) { deviceRestoredCb_ = std::move(cb); }
+
 private:
     bool createDevice();
     bool createSwapChain(HWND hwnd);
@@ -37,6 +46,7 @@ private:
     bool createNV12Shader();
     bool createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int width, int height);
     void setupDrawState();
+    void destroyResources();  // Internal: release GPU resources without locking
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -60,6 +70,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     bool initialized_ = false;
+    HWND hwnd_ = nullptr;  // Saved for device-lost reinitialization
 
     // NV12 hardware decode rendering
     ComPtr<ID3D11PixelShader> nv12PixelShader_;
@@ -71,4 +82,7 @@ private:
 
     // Mutex shared with D3D11VA hardware decoder for context synchronization
     std::mutex contextMutex_;
+
+    // Callback invoked after device is recreated in handleDeviceLost()
+    DeviceRestoredCallback deviceRestoredCb_;
 };

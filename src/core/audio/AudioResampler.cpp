@@ -45,6 +45,11 @@ bool AudioResampler::init(int sampleRate, int channels, AVSampleFormat format) {
         nullptr, nullptr, filterGraph_);
     if (ret < 0) { destroy(); return false; }
 
+    // Force S16 interleaved output so data[0] is always contiguous
+    const enum AVSampleFormat out_fmts[] = { AV_SAMPLE_FMT_S16, AV_SAMPLE_FMT_NONE };
+    av_opt_set_int_list(sinkCtx_, "sample_fmts", out_fmts, AV_SAMPLE_FMT_NONE,
+                        AV_OPT_SEARCH_CHILDREN);
+
     ret = avfilter_link(srcCtx_, 0, atempoCtx_, 0);
     if (ret < 0) { destroy(); return false; }
 

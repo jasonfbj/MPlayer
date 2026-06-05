@@ -32,6 +32,19 @@ MPlayerFrame::MPlayerFrame()
     renderer_ = renderer.get();
     player_->setRenderer(std::move(renderer));
 
+    // Register device-restored callback so hardware decoder is updated
+    // when D3D11 device is recreated after device lost
+    renderer_->setDeviceRestoredCallback([this](void* newDevice) {
+        // Re-open the current file to reinitialize decoder with new device
+        if (!lastOpenedUrl_.empty()) {
+            auto state = player_->state();
+            player_->close();
+            if (player_->open(lastOpenedUrl_)) {
+                player_->play();
+            }
+        }
+    });
+
     // Create audio output
     auto audio = std::make_unique<WinAudioOutput>();
     player_->setAudioOutput(std::move(audio));
@@ -275,12 +288,16 @@ void MPlayerFrame::onTimer(wxTimerEvent&) {
 
     updateStatusBar();
 
-    // Loop playback: when stopped (EOF reached) and loop is enabled, restart
-    if (player_ && player_->state() == PlayerController::Stopped &&
-        isLoopEnabled() && !lastOpenedUrl_.empty()) {
-        player_->close();
-        if (player_->open(lastOpenedUrl_)) {
-            player_->play();
+    // Loop playback: when playback is complete (EOF + all frames consumed)
+    if (player_ && player_->state() == PlayerController::Playing &&
+        player_->isPlaybackComplete()) {
+        if (isLoopEnabled() && !lastOpenedUrl_.empty()) {
+            player_->close();
+            if (player_->open(lastOpenedUrl_)) {
+                player_->play();
+            }
+        } else {
+            player_->stop();
         }
     }
 }

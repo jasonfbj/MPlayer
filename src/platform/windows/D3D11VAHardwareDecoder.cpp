@@ -121,6 +121,30 @@ void D3D11VAHardwareDecoder::flush() {
     if (codecCtx_) avcodec_flush_buffers(codecCtx_);
 }
 
+void D3D11VAHardwareDecoder::onDeviceRestored(ID3D11Device* newDevice) {
+    if (!newDevice) return;
+
+    // Tear down old FFmpeg codec context and hw device context
+    if (codecCtx_) {
+        avcodec_free_context(&codecCtx_);
+        codecCtx_ = nullptr;
+    }
+    if (hwDeviceCtx_) {
+        av_buffer_unref(&hwDeviceCtx_);
+        hwDeviceCtx_ = nullptr;
+    }
+    lastTexture_.Reset();
+
+    // Update shared device pointers
+    sharedDevice_ = newDevice;
+    sharedContext_.Reset();
+    newDevice->GetImmediateContext(&sharedContext_);
+
+    initialized_ = false;
+    // Note: caller must re-init the decoder (via open() + init()) to fully restore.
+    // This is expected to happen as part of the device-lost recovery flow.
+}
+
 void D3D11VAHardwareDecoder::destroy() {
     if (codecCtx_) {
         avcodec_free_context(&codecCtx_);

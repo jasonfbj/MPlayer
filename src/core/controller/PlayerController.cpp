@@ -1,5 +1,7 @@
 #include "core/controller/PlayerController.h"
 
+#include <algorithm>
+
 #ifdef _WIN32
 #include "platform/windows/D3D11VAHardwareDecoder.h"
 #elif defined(__ANDROID__)
@@ -18,6 +20,7 @@ extern "C" {
 
 extern "C" {
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 }
 
 static const size_t MAX_PACKET_QUEUE_SIZE = 500;
@@ -73,6 +76,7 @@ bool PlayerController::open(const std::string& url) {
     if (audioOutput_ && demuxer_->getAudioStreamIndex() >= 0) {
         auto* aparams = demuxer_->getAudioParams();
         audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
+        setupAudioCallback();
     }
 
     initAudioResampler();
@@ -123,6 +127,7 @@ bool PlayerController::open(const std::string& url, const NetworkConfig& config)
     if (audioOutput_ && demuxer_->getAudioStreamIndex() >= 0) {
         auto* aparams = demuxer_->getAudioParams();
         audioOutput_->init(aparams->sample_rate, aparams->ch_layout.nb_channels, 2);
+        setupAudioCallback();
     }
 
     initAudioResampler();
@@ -133,6 +138,10 @@ bool PlayerController::open(const std::string& url, const NetworkConfig& config)
 
 void PlayerController::close() {
     stop();
+
+    eof_ = false;
+    audioResidual_.clear();
+    audioResidualOffset_ = 0;
 
     videoPacketQueue_.finish();
     audioPacketQueue_.finish();
@@ -156,7 +165,9 @@ void PlayerController::play() {
     if (state_ != Paused && state_ != Stopped) return;
 
     if (state_ == Stopped) {
+        eof_ = false;
         running_ = true;
+        paused_ = false;
         videoPacketQueue_.clear();
         audioPacketQueue_.clear();
         videoFrameQueue_.clear();
@@ -164,15 +175,32 @@ void PlayerController::play() {
 
         if (!demuxer_->isOpened() && !currentUrl_.empty()) {
             demuxer_->open(currentUrl_);
-            if (videoDecoder_) videoDecoder_->flush();
-            if (audioDecoder_) audioDecoder_->flush();
         }
+
+        // Seek to beginning so playback restarts from the start.
+        // If seek fails (e.g., demuxer was still open at EOF), close and reopen.
+        // Safe to call directly: readThread hasn't started yet.
+        if (demuxer_->isOpened()) {
+            if (!demuxer_->seek(0)) {
+                demuxer_->close();
+                if (!currentUrl_.empty()) {
+                    demuxer_->open(currentUrl_);
+                }
+            }
+        }
+
+        if (videoDecoder_) videoDecoder_->flush();
+        if (audioDecoder_) audioDecoder_->flush();
 
         readThread_ = std::thread(&PlayerController::readThread, this);
         videoDecodeThread_ = std::thread(&PlayerController::videoDecodeThread, this);
         if (audioDecoder_) {
             audioDecodeThread_ = std::thread(&PlayerController::audioDecodeThread, this);
         }
+    } else if (state_ == Paused) {
+        // Unpause: wake up decode threads so they resume processing
+        paused_ = false;
+        pauseCond_.notify_all();
     }
 
     if (audioOutput_) audioOutput_->start();
@@ -181,12 +209,16 @@ void PlayerController::play() {
 
 void PlayerController::pause() {
     if (state_ != Playing) return;
+    paused_ = true;
+    pauseCond_.notify_all();
     if (audioOutput_) audioOutput_->stop();
     setState(Paused);
 }
 
 void PlayerController::stop() {
     running_ = false;
+    paused_ = false;
+    pauseCond_.notify_all();
 
     videoPacketQueue_.finish();
     audioPacketQueue_.finish();
@@ -201,7 +233,9 @@ void PlayerController::stop() {
 
 void PlayerController::seek(double seconds) {
     if (!demuxer_->isOpened()) return;
+    if (state_ != Playing && state_ != Paused) return;
 
+    // Clear queues to discard stale data
     videoPacketQueue_.clear();
     audioPacketQueue_.clear();
     videoFrameQueue_.clear();
@@ -210,8 +244,21 @@ void PlayerController::seek(double seconds) {
     if (videoDecoder_) videoDecoder_->flush();
     if (audioDecoder_) audioDecoder_->flush();
 
-    demuxer_->seek(seconds);
+    // Request seek on readThread — avoids blocking main thread on network I/O
+    seekTarget_ = seconds;
+    seekRequested_ = true;
     currentPosition_ = seconds;
+
+    // Wake readThread from pause or blocked state to process the seek
+    pauseCond_.notify_all();
+
+    // If currently paused, briefly unpause to decode the seek target frame,
+    // then re-pause after one frame is produced
+    if (paused_.load()) {
+        seekPauseAfterDecode_ = true;
+        paused_ = false;
+        pauseCond_.notify_all();
+    }
 }
 
 void PlayerController::setSpeed(float speed) {
@@ -268,6 +315,23 @@ VideoInfo PlayerController::getVideoInfo() const {
 void PlayerController::readThread() {
     AVPacket* packet = av_packet_alloc();
     while (running_) {
+        // Wait here while paused
+        {
+            std::unique_lock<std::mutex> lock(pauseMutex_);
+            pauseCond_.wait(lock, [this] {
+                return (!paused_.load() && !seekRequested_.load()) || !running_.load();
+            });
+        }
+        if (!running_) break;
+
+        // Handle seek request on the read thread — avoids blocking main thread
+        if (seekRequested_.exchange(false)) {
+            double target = seekTarget_.load();
+            demuxer_->seek(target);
+            currentPosition_ = target;
+            continue;
+        }
+
         if (!demuxer_->readPacket(packet)) {
             break;
         }
@@ -289,14 +353,31 @@ void PlayerController::readThread() {
         av_packet_unref(packet);
     }
     av_packet_free(&packet);
+
+    // Signal EOF: finish packet queues so decode threads know to stop
+    eof_ = true;
+    videoPacketQueue_.finish();
+    audioPacketQueue_.finish();
 }
 
 void PlayerController::videoDecodeThread() {
     AVFrame* frame = av_frame_alloc();
     AVPacket* packet = nullptr;
 
+    // PTS-based frame pacing state
+    double prevPts = -1.0;
+
     while (running_) {
+        // Wait here while paused
+        {
+            std::unique_lock<std::mutex> lock(pauseMutex_);
+            pauseCond_.wait(lock, [this] { return !paused_.load() || !running_.load(); });
+        }
+        if (!running_) break;
+
         if (!videoPacketQueue_.pop(packet, 100)) {
+            // Packet queue finished (EOF) — exit decode loop
+            if (videoPacketQueue_.isFinished()) break;
             continue;
         }
 
@@ -307,7 +388,20 @@ void PlayerController::videoDecodeThread() {
 
             AVRational timeBase = demuxer_->getFormatContext()->
                 streams[demuxer_->getVideoStreamIndex()]->time_base;
-            vf.pts = frame->pts * av_q2d(timeBase);
+            if (frame->pts != AV_NOPTS_VALUE) {
+                vf.pts = frame->pts * av_q2d(timeBase);
+            } else if (frame->best_effort_timestamp != AV_NOPTS_VALUE) {
+                vf.pts = frame->best_effort_timestamp * av_q2d(timeBase);
+            } else {
+                // No valid PTS — estimate from frame rate
+                AVRational frameRate = demuxer_->getFormatContext()->
+                    streams[demuxer_->getVideoStreamIndex()]->avg_frame_rate;
+                if (frameRate.num > 0 && frameRate.den > 0) {
+                    vf.pts = currentPosition_.load() + av_q2d(av_inv_q(frameRate));
+                } else {
+                    vf.pts = currentPosition_.load() + 1.0 / 30.0;
+                }
+            }
 
             if (videoDecoder_->isHardware()) {
                 // Hardware decode path - NativeTexture
@@ -336,8 +430,6 @@ void PlayerController::videoDecodeThread() {
                         vf.data[i].assign(frame->data[i], frame->data[i] + size);
                     }
                 } else if (fmt == AV_PIX_FMT_NV12) {
-                    // Convert NV12 to YUV420P so the renderer can handle it
-                    // (renderer only supports YUV420P for software decode path)
                     vf.format = VideoFrame::YUV420P;
                     vf.linesize[0] = frame->width;
                     vf.linesize[1] = frame->width / 2;
@@ -345,7 +437,6 @@ void PlayerController::videoDecodeThread() {
 
                     int halfH = frame->height / 2;
 
-                    // Copy Y plane (tight packing)
                     vf.data[0].resize(frame->width * frame->height);
                     for (int y = 0; y < frame->height; y++) {
                         memcpy(vf.data[0].data() + y * frame->width,
@@ -353,7 +444,6 @@ void PlayerController::videoDecodeThread() {
                                frame->width);
                     }
 
-                    // De-interleave UV plane into separate U and V planes
                     vf.data[1].resize((frame->width / 2) * halfH);
                     vf.data[2].resize((frame->width / 2) * halfH);
                     int uvLinesize = frame->linesize[1];
@@ -367,7 +457,6 @@ void PlayerController::videoDecodeThread() {
                         }
                     }
                 } else if (fmt == AV_PIX_FMT_YUV422P || fmt == AV_PIX_FMT_YUVJ422P) {
-                    // Treat 422 as 420 — copy only top-half rows for U/V
                     vf.format = VideoFrame::YUV420P;
                     vf.linesize[0] = frame->linesize[0];
                     vf.data[0].assign(frame->data[0], frame->data[0] + frame->linesize[0] * frame->height);
@@ -387,12 +476,28 @@ void PlayerController::videoDecodeThread() {
                                frame->linesize[2]);
                     }
                 } else {
-                    // Unsupported format — skip this frame
                     av_packet_free(&packet);
                     av_frame_unref(frame);
                     continue;
                 }
             }
+
+            // PTS-based frame pacing: wait between frames to match video timing
+            // Uses condition_variable so pause/stop can interrupt the wait
+            double pts = vf.pts;
+            if (prevPts >= 0) {
+                double ptsDiff = pts - prevPts;
+                if (ptsDiff > 0 && ptsDiff < 1.0) {
+                    double delay = ptsDiff / speed_.load();
+                    if (delay > 0.001) {
+                        std::unique_lock<std::mutex> lock(pauseMutex_);
+                        pauseCond_.wait_for(lock,
+                            std::chrono::duration<double>(delay),
+                            [this] { return paused_.load() || !running_.load(); });
+                    }
+                }
+            }
+            prevPts = pts;
 
             if (videoFrameCb_) {
                 videoFrameCb_(vf);
@@ -405,13 +510,23 @@ void PlayerController::videoDecodeThread() {
             }
 
             videoFrameQueue_.push(std::move(vf));
-            currentPosition_ = vf.pts;
+            currentPosition_ = pts;
+
+            // If seek-while-paused, pause again after producing one frame
+            if (seekPauseAfterDecode_.exchange(false)) {
+                prevPts = -1.0;  // Reset pacing state for next unpause
+                paused_ = true;
+                if (audioOutput_) audioOutput_->stop();
+                setState(Paused);
+            }
         }
 
         av_packet_free(&packet);
         av_frame_unref(frame);
     }
 
+    // Signal that no more video frames will be produced
+    videoFrameQueue_.finish();
     av_frame_free(&frame);
 }
 
@@ -419,8 +534,23 @@ void PlayerController::audioDecodeThread() {
     AVFrame* frame = av_frame_alloc();
     AVPacket* packet = nullptr;
 
+    // SwrContext for converting any input format → S16 interleaved
+    SwrContext* swrCtx = nullptr;
+    AVSampleFormat lastFmt = AV_SAMPLE_FMT_NONE;
+    int lastChannels = 0;
+    int lastSampleRate = 0;
+
     while (running_) {
+        // Wait here while paused
+        {
+            std::unique_lock<std::mutex> lock(pauseMutex_);
+            pauseCond_.wait(lock, [this] { return !paused_.load() || !running_.load(); });
+        }
+        if (!running_) break;
+
         if (!audioPacketQueue_.pop(packet, 100)) {
+            // Packet queue finished (EOF) — exit decode loop
+            if (audioPacketQueue_.isFinished()) break;
             continue;
         }
 
@@ -429,28 +559,69 @@ void PlayerController::audioDecodeThread() {
             af.sampleRate = frame->sample_rate;
             af.channels = frame->ch_layout.nb_channels;
             af.samples = frame->nb_samples;
-            af.bytesPerSample = av_get_bytes_per_sample(static_cast<AVSampleFormat>(frame->format));
+            af.bytesPerSample = 2;  // Always output S16 (matches WASAPI init)
 
             AVRational timeBase = demuxer_->getFormatContext()->
                 streams[demuxer_->getAudioStreamIndex()]->time_base;
-            af.pts = frame->pts * av_q2d(timeBase);
+            af.pts = (frame->pts != AV_NOPTS_VALUE) ?
+                frame->pts * av_q2d(timeBase) : 0.0;
 
-            int dataSize = av_samples_get_buffer_size(nullptr, af.channels, af.samples,
-                static_cast<AVSampleFormat>(frame->format), 1);
-
-            if (dataSize > 0 && frame->data[0]) {
-                if (audioResampler_ && speed_ != 1.0f) {
-                    std::vector<uint8_t> resampled;
-                    if (audioResampler_->process(frame, resampled)) {
-                        af.data = std::move(resampled);
-                        af.samples = static_cast<int>(af.data.size()) /
-                            (af.channels * af.bytesPerSample);
-                    } else {
-                        af.data.assign(frame->data[0], frame->data[0] + dataSize);
-                    }
-                } else {
-                    af.data.assign(frame->data[0], frame->data[0] + dataSize);
+            // Speed change via atempo filter (outputs S16 via sink config)
+            if (audioResampler_ && speed_ != 1.0f) {
+                std::vector<uint8_t> resampled;
+                if (audioResampler_->process(frame, resampled)) {
+                    af.data = std::move(resampled);
+                    af.samples = static_cast<int>(af.data.size()) /
+                        (af.channels * af.bytesPerSample);
                 }
+            } else {
+                // Convert to S16 interleaved using swr_convert
+                AVSampleFormat fmt = static_cast<AVSampleFormat>(frame->format);
+
+                // (Re)create SwrContext if input format changed
+                if (!swrCtx || fmt != lastFmt || af.channels != lastChannels
+                    || af.sampleRate != lastSampleRate) {
+                    if (swrCtx) swr_free(&swrCtx);
+
+                    AVChannelLayout outLayout;
+                    av_channel_layout_default(&outLayout, af.channels);
+                    AVChannelLayout inLayout;
+                    av_channel_layout_copy(&inLayout, &frame->ch_layout);
+
+                    int ret = swr_alloc_set_opts2(&swrCtx,
+                        &outLayout, AV_SAMPLE_FMT_S16, af.sampleRate,
+                        &inLayout, fmt, af.sampleRate,
+                        0, nullptr);
+
+                    if (ret >= 0 && swrCtx) {
+                        swr_init(swrCtx);
+                    }
+
+                    av_channel_layout_uninit(&outLayout);
+                    av_channel_layout_uninit(&inLayout);
+
+                    lastFmt = fmt;
+                    lastChannels = af.channels;
+                    lastSampleRate = af.sampleRate;
+                }
+
+                if (swrCtx) {
+                    int bufSize = af.samples * af.channels * af.bytesPerSample;
+                    af.data.resize(bufSize);
+                    uint8_t* outBuf = af.data.data();
+                    int converted = swr_convert(swrCtx, &outBuf, af.samples,
+                        const_cast<const uint8_t**>(frame->extended_data),
+                        af.samples);
+                    if (converted > 0) {
+                        af.samples = converted;
+                        af.data.resize(converted * af.channels * af.bytesPerSample);
+                    } else {
+                        af.data.clear();
+                    }
+                }
+            }
+
+            if (!af.data.empty()) {
                 audioFrameQueue_.push(std::move(af));
             }
         }
@@ -459,12 +630,22 @@ void PlayerController::audioDecodeThread() {
         av_frame_unref(frame);
     }
 
+    if (swrCtx) swr_free(&swrCtx);
+    audioFrameQueue_.finish();
     av_frame_free(&frame);
 }
 
 void PlayerController::setState(State s) {
     state_ = s;
     if (stateCb_) stateCb_(s);
+}
+
+bool PlayerController::isPlaybackComplete() const {
+    if (!eof_.load()) return false;
+    if (!videoFrameQueue_.isFinished()) return false;
+    // For audio-only or audio+video files, also wait for audio to finish
+    if (audioDecoder_ && !audioFrameQueue_.isFinished()) return false;
+    return true;
 }
 
 void PlayerController::setConnectionCallback(ConnectionCallback cb) {
@@ -542,4 +723,38 @@ bool PlayerController::captureFrame(const std::string& savePath) {
         4, rgbaData.data(), frame.width * 4);
 
     return result != 0;
+}
+
+void PlayerController::setupAudioCallback() {
+    audioOutput_->setCallback([this](uint8_t* output, int size) {
+        // Pull data from the audio frame queue to fill the output buffer.
+        // Non-blocking: pop(af, 0) returns immediately if no data is available.
+        int remaining = size;
+        uint8_t* outPtr = output;
+
+        while (remaining > 0) {
+            if (audioResidual_.empty()) {
+                AudioFrame af;
+                if (!audioFrameQueue_.pop(af, 0)) {
+                    // No data available — fill rest with silence
+                    memset(outPtr, 0, remaining);
+                    break;
+                }
+                audioResidual_ = std::move(af.data);
+                audioResidualOffset_ = 0;
+            }
+
+            int available = static_cast<int>(audioResidual_.size()) - audioResidualOffset_;
+            int toCopy = (std::min)(remaining, available);
+            memcpy(outPtr, audioResidual_.data() + audioResidualOffset_, toCopy);
+            outPtr += toCopy;
+            remaining -= toCopy;
+            audioResidualOffset_ += toCopy;
+
+            if (audioResidualOffset_ >= static_cast<int>(audioResidual_.size())) {
+                audioResidual_.clear();
+                audioResidualOffset_ = 0;
+            }
+        }
+    });
 }

@@ -49,6 +49,13 @@ void VideoPanel::renderFrame() {
         return;
     }
 
+    // Skip rendering when minimized — don't consume frames we can't display.
+    // This prevents playback position from advancing while the window is hidden.
+    HWND hwnd = GetHWND();
+    if (hwnd && IsIconic(hwnd)) {
+        return;
+    }
+
     // Consume all available frames, keep only the latest
     VideoFrame latestFrame;
     bool hasFrame = false;
@@ -83,6 +90,8 @@ void VideoPanel::onSize(wxSizeEvent& event) {
     auto* renderer = frame_->renderer();
     if (renderer && d3d11Ready_) {
         wxSize size = GetClientSize();
+        // Skip resize when minimized (size becomes 0) — D3D11 can't handle 0-size targets.
+        // The renderer will be properly resized when the window is restored.
         if (size.GetWidth() > 0 && size.GetHeight() > 0) {
             renderer->resize(size.GetWidth(), size.GetHeight());
         }

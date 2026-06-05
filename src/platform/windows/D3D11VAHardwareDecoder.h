@@ -24,6 +24,10 @@ public:
     // Shared device from renderer — gets context internally via GetImmediateContext
     void setSharedDevice(ID3D11Device* device);
     void setContextMutex(std::mutex* mtx) { contextMutex_ = mtx; }
+
+    // Called when the D3D11 device is recreated after device lost.
+    // Tears down the old FFmpeg hw device context and reinitializes with the new device.
+    void onDeviceRestored(ID3D11Device* newDevice);
     bool getLastNativeTexture(NativeTexture& tex) const;
 
     ID3D11Texture2D* getLastDecodedTexture() const { return lastTexture_.Get(); }

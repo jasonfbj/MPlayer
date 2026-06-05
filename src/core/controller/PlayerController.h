@@ -15,6 +15,7 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <chrono>
 #include <string>
 #include <functional>
 #include <mutex>
@@ -73,6 +74,10 @@ public:
     BlockingQueue<VideoFrame>& videoFrameQueue() { return videoFrameQueue_; }
     BlockingQueue<AudioFrame>& audioFrameQueue() { return audioFrameQueue_; }
 
+    // 播放完成查询（EOF 且所有帧已消费）
+    bool isPlaybackComplete() const;
+    bool isEof() const { return eof_.load(); }
+
 private:
     void readThread();
     void videoDecodeThread();
@@ -80,6 +85,7 @@ private:
 
     void setState(State s);
     void initAudioResampler();
+    void setupAudioCallback();
 
     std::unique_ptr<Demuxer> demuxer_;
     std::unique_ptr<IDecoder> videoDecoder_;
@@ -97,6 +103,20 @@ private:
     std::thread videoDecodeThread_;
     std::thread audioDecodeThread_;
     std::atomic<bool> running_{false};
+    std::atomic<bool> eof_{false};
+
+    // Pause/seek synchronization: decode threads wait on this when paused
+    std::mutex pauseMutex_;
+    std::condition_variable pauseCond_;
+    std::atomic<bool> paused_{false};
+
+    // Seek request: readThread performs the seek on its own thread,
+    // avoiding main-thread blocking on network I/O
+    std::atomic<bool> seekRequested_{false};
+    std::atomic<double> seekTarget_{0.0};
+
+    // When set, decode threads will pause after processing the seek target
+    std::atomic<bool> seekPauseAfterDecode_{false};
 
     std::atomic<State> state_{Idle};
     std::atomic<float> speed_{1.0f};
@@ -110,4 +130,8 @@ private:
     FrameCallback videoFrameCb_;
     StateCallback stateCb_;
     ErrorCallback errorCb_;
+
+    // Audio residual buffer for feeding partial frames to audio output
+    std::vector<uint8_t> audioResidual_;
+    int audioResidualOffset_ = 0;
 };
