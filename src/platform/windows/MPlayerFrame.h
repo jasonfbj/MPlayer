@@ -45,6 +45,7 @@ public:
 
     // State query
     bool isPlaying() const;
+    bool isLoopEnabled() const;
 
 private:
     void createMenuBar();
@@ -68,6 +69,7 @@ private:
     wxTimer* updateTimer_ = nullptr;
 
     ConnectionState connectionState_ = ConnectionState::Disconnected;
+    std::string lastOpenedUrl_;
 
     wxDECLARE_EVENT_TABLE();
 };

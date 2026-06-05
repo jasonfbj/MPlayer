@@ -7,6 +7,7 @@
 #include <wx/textctrl.h>
 #include <wx/bmpbuttn.h>
 #include <wx/artprov.h>
+#include <wx/checkbox.h>
 
 #include "core/controller/PlayerController.h"
 
@@ -21,6 +22,9 @@ public:
 
     // Called when player state changes
     void onPlayerStateChanged(PlayerController::State state);
+
+    // Loop mode query
+    bool isLoopEnabled() const { return loopCheckbox_->GetValue(); }
 
 private:
     void createControls();
@@ -49,6 +53,7 @@ private:
     wxButton* rtmpConnectBtn_ = nullptr;
     wxStaticText* videoInfoLabel_ = nullptr;
     wxStaticText* connectionLabel_ = nullptr;
+    wxCheckBox* loopCheckbox_ = nullptr;
 
     bool seeking_ = false;
 

@@ -180,6 +180,7 @@ void MPlayerFrame::openFile() {
         player_->close();
         std::string path = dlg.GetPath().ToUTF8().data();
         if (player_->open(path)) {
+            lastOpenedUrl_ = path;
             player_->play();
             SetStatusText(wxString::FromUTF8(path), 0);
         } else {
@@ -200,6 +201,7 @@ void MPlayerFrame::openRtmp(const wxString& url) {
     player_->close();
     std::string urlStr = url.ToUTF8().data();
     if (player_->open(urlStr)) {
+        lastOpenedUrl_ = urlStr;
         player_->play();
         SetStatusText(url, 0);
     } else {
@@ -256,6 +258,10 @@ bool MPlayerFrame::isPlaying() const {
     return player_ && player_->state() == PlayerController::Playing;
 }
 
+bool MPlayerFrame::isLoopEnabled() const {
+    return controlPanel_ && controlPanel_->isLoopEnabled();
+}
+
 void MPlayerFrame::onTimer(wxTimerEvent&) {
     // Drive video rendering
     if (videoPanel_) {
@@ -268,6 +274,15 @@ void MPlayerFrame::onTimer(wxTimerEvent&) {
     }
 
     updateStatusBar();
+
+    // Loop playback: when stopped (EOF reached) and loop is enabled, restart
+    if (player_ && player_->state() == PlayerController::Stopped &&
+        isLoopEnabled() && !lastOpenedUrl_.empty()) {
+        player_->close();
+        if (player_->open(lastOpenedUrl_)) {
+            player_->play();
+        }
+    }
 }
 
 void MPlayerFrame::onPlayerStateChanged(PlayerController::State state) {

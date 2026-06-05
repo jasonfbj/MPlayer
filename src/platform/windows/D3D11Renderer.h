@@ -36,6 +36,7 @@ private:
     bool createVertexBuffer();
     bool createNV12Shader();
     bool createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int width, int height);
+    void setupDrawState();
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
@@ -43,6 +44,7 @@ private:
     ComPtr<ID3D11RenderTargetView> renderTargetView_;
     ComPtr<ID3D11VertexShader> vertexShader_;
     ComPtr<ID3D11PixelShader> pixelShader_;
+    ComPtr<ID3D11InputLayout> inputLayout_;
     ComPtr<ID3D11SamplerState> samplerState_;
     ComPtr<ID3D11Buffer> vertexBuffer_;
 
@@ -61,6 +63,7 @@ private:
     ComPtr<ID3D11PixelShader> nv12PixelShader_;
     ComPtr<ID3D11ShaderResourceView> nv12YSRV_;
     ComPtr<ID3D11ShaderResourceView> nv12UVSRV_;
+    ComPtr<ID3D11Texture2D> hwCopyTexture_;  // Shader-visible copy of decoded texture
     int hwTexWidth_ = 0;
     int hwTexHeight_ = 0;
 

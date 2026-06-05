@@ -90,6 +90,15 @@ bool D3D11Renderer::createShaders() {
         vsBlob->GetBufferSize(), nullptr, &vertexShader_);
     if (FAILED(hr)) return false;
 
+    // Create input layout matching VS_INPUT: {float2 pos, float2 uv}
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    hr = device_->CreateInputLayout(layout, 2,
+        vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &inputLayout_);
+    if (FAILED(hr)) return false;
+
     const char* psSource = R"(
         Texture2D<float> texY : register(t0);
         Texture2D<float> texU : register(t1);
@@ -147,6 +156,25 @@ bool D3D11Renderer::createVertexBuffer() {
     data.pSysMem = vertices;
 
     return SUCCEEDED(device_->CreateBuffer(&desc, &data, &vertexBuffer_));
+}
+
+void D3D11Renderer::setupDrawState() {
+    // Set viewport to match render target
+    D3D11_VIEWPORT vp = {};
+    vp.TopLeftX = 0;
+    vp.TopLeftY = 0;
+    vp.Width = static_cast<float>(width_);
+    vp.Height = static_cast<float>(height_);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context_->RSSetViewports(1, &vp);
+
+    // Bind input layout and vertex buffer
+    context_->IASetInputLayout(inputLayout_.Get());
+    UINT stride = sizeof(float) * 4;
+    UINT offset = 0;
+    context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
+    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
 }
 
 bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
@@ -212,10 +240,7 @@ bool D3D11Renderer::renderFrame(const VideoFrame& frame) {
     context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
     context_->PSSetShader(pixelShader_.Get(), nullptr, 0);
 
-    UINT stride = sizeof(float) * 4;
-    UINT offset = 0;
-    context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
-    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    setupDrawState();
     context_->Draw(4, 0);
 
     swapChain_->Present(1, 0);
@@ -242,10 +267,7 @@ bool D3D11Renderer::renderTexture(const NativeTexture& texture) {
     context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
     context_->PSSetShader(nv12PixelShader_.Get(), nullptr, 0);
 
-    UINT stride = sizeof(float) * 4;
-    UINT offset = 0;
-    context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
-    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    setupDrawState();
     context_->Draw(4, 0);
 
     swapChain_->Present(1, 0);
@@ -283,38 +305,57 @@ bool D3D11Renderer::createNV12Shader() {
 bool D3D11Renderer::createNV12SRVs(ID3D11Texture2D* srcTexture, int index, int width, int height) {
     if (!srcTexture) return false;
 
-    // Reuse existing SRVs if dimensions haven't changed
-    if (nv12YSRV_ && nv12UVSRV_ && width == hwTexWidth_ && height == hwTexHeight_) {
-        // Still need to update SRVs if the source texture changed
-        // For now, recreate to be safe
-    }
-    hwTexWidth_ = width;
-    hwTexHeight_ = height;
+    // Get the source texture's actual dimensions (may have alignment padding)
+    D3D11_TEXTURE2D_DESC srcDesc;
+    srcTexture->GetDesc(&srcDesc);
 
-    // Y plane SRV — R8_UNORM, slice [index]
-    D3D11_SHADER_RESOURCE_VIEW_DESC yDesc = {};
-    yDesc.Format = DXGI_FORMAT_R8_UNORM;
-    yDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    yDesc.Texture2DArray.MipLevels = 1;
-    yDesc.Texture2DArray.FirstArraySlice = index;
-    yDesc.Texture2DArray.ArraySize = 1;
-
-    HRESULT hr = device_->CreateShaderResourceView(srcTexture, &yDesc, &nv12YSRV_);
-    if (FAILED(hr)) return false;
-
-    // UV plane SRV — R8G8_UNORM, slice [index]
-    D3D11_SHADER_RESOURCE_VIEW_DESC uvDesc = {};
-    uvDesc.Format = DXGI_FORMAT_R8G8_UNORM;
-    uvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-    uvDesc.Texture2DArray.MipLevels = 1;
-    uvDesc.Texture2DArray.FirstArraySlice = index;
-    uvDesc.Texture2DArray.ArraySize = 1;
-
-    hr = device_->CreateShaderResourceView(srcTexture, &uvDesc, &nv12UVSRV_);
-    if (FAILED(hr)) {
+    // Recreate the shader-visible copy texture if source dimensions changed
+    if (!hwCopyTexture_ || srcDesc.Width != hwTexWidth_ || srcDesc.Height != hwTexHeight_) {
+        hwCopyTexture_.Reset();
         nv12YSRV_.Reset();
-        return false;
+        nv12UVSRV_.Reset();
+
+        D3D11_TEXTURE2D_DESC copyDesc = {};
+        copyDesc.Width = srcDesc.Width;
+        copyDesc.Height = srcDesc.Height;
+        copyDesc.MipLevels = 1;
+        copyDesc.ArraySize = 1;
+        copyDesc.Format = srcDesc.Format;
+        copyDesc.SampleDesc.Count = 1;
+        copyDesc.Usage = D3D11_USAGE_DEFAULT;
+        copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        if (FAILED(device_->CreateTexture2D(&copyDesc, nullptr, &hwCopyTexture_)))
+            return false;
+
+        hwTexWidth_ = srcDesc.Width;
+        hwTexHeight_ = srcDesc.Height;
+
+        // Create Y plane SRV
+        D3D11_SHADER_RESOURCE_VIEW_DESC yDesc = {};
+        yDesc.Format = DXGI_FORMAT_R8_UNORM;
+        yDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        yDesc.Texture2D.MipLevels = 1;
+        yDesc.Texture2D.MostDetailedMip = 0;
+
+        if (FAILED(device_->CreateShaderResourceView(hwCopyTexture_.Get(), &yDesc, &nv12YSRV_)))
+            return false;
+
+        // Create UV plane SRV
+        D3D11_SHADER_RESOURCE_VIEW_DESC uvDesc = {};
+        uvDesc.Format = DXGI_FORMAT_R8G8_UNORM;
+        uvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        uvDesc.Texture2D.MipLevels = 1;
+        uvDesc.Texture2D.MostDetailedMip = 0;
+
+        if (FAILED(device_->CreateShaderResourceView(hwCopyTexture_.Get(), &uvDesc, &nv12UVSRV_))) {
+            nv12YSRV_.Reset();
+            return false;
+        }
     }
+
+    // Copy decoded frame (srcTexture array slice [index]) to our shader-visible texture
+    context_->CopySubresourceRegion(hwCopyTexture_.Get(), 0, 0, 0, 0, srcTexture, index, nullptr);
 
     return true;
 }
@@ -338,7 +379,9 @@ void D3D11Renderer::resize(int width, int height) {
 void D3D11Renderer::destroy() {
     nv12UVSRV_.Reset();
     nv12YSRV_.Reset();
+    hwCopyTexture_.Reset();
     nv12PixelShader_.Reset();
+    inputLayout_.Reset();
     hwTexWidth_ = 0;
     hwTexHeight_ = 0;
     y_SRV_.Reset(); u_SRV_.Reset(); v_SRV_.Reset();

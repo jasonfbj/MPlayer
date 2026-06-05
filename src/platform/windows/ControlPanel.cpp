@@ -10,6 +10,7 @@ enum {
     ID_SPEED_COMBO,
     ID_RTMP_INPUT,
     ID_RTMP_CONNECT,
+    ID_LOOP_CHECKBOX,
 };
 
 wxBEGIN_EVENT_TABLE(ControlPanel, wxPanel)
@@ -35,7 +36,7 @@ ControlPanel::ControlPanel(MPlayerFrame* frame)
 void ControlPanel::createControls() {
     auto* mainSizer = new wxBoxSizer(wxVERTICAL);
 
-    // ── Row 1: Seek bar + time labels ──
+    // -- Row 1: Seek bar + time labels --
     {
         auto* row = new wxBoxSizer(wxHORIZONTAL);
 
@@ -52,34 +53,42 @@ void ControlPanel::createControls() {
         mainSizer->Add(row, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 6);
     }
 
-    // ── Row 2: Playback controls ──
+    // -- Row 2: Playback controls --
     {
         auto* row = new wxBoxSizer(wxHORIZONTAL);
 
         // Open File button
-        openFileBtn_ = new wxButton(this, ID_OPEN_FILE_BTN, "Open File");
-        openFileBtn_->SetToolTip("Open a video file");
+        openFileBtn_ = new wxButton(this, ID_OPEN_FILE_BTN, "Open");
+        openFileBtn_->SetToolTip("Open a video file (Ctrl+O)");
         row->Add(openFileBtn_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
-        row->AddSpacer(8);
+        row->AddSpacer(6);
 
         // Play/Pause button
-        playPauseBtn_ = new wxButton(this, ID_PLAY_PAUSE, "▶ Play");
-        playPauseBtn_->SetMinSize(wxSize(90, 32));
-        playPauseBtn_->SetToolTip("Play / Pause (Space)");
+        playPauseBtn_ = new wxButton(this, ID_PLAY_PAUSE, "Play");
+        playPauseBtn_->SetMinSize(wxSize(80, 32));
+        playPauseBtn_->SetToolTip("Play / Pause");
         row->Add(playPauseBtn_, 0, wxALIGN_CENTER_VERTICAL);
         row->AddSpacer(4);
 
         // Stop button
-        stopBtn_ = new wxButton(this, ID_STOP, "■ Stop");
-        stopBtn_->SetMinSize(wxSize(80, 32));
+        stopBtn_ = new wxButton(this, ID_STOP, "Stop");
+        stopBtn_->SetMinSize(wxSize(70, 32));
         stopBtn_->SetToolTip("Stop playback");
         row->Add(stopBtn_, 0, wxALIGN_CENTER_VERTICAL);
+        row->AddSpacer(4);
+
+        // Loop checkbox
+        loopCheckbox_ = new wxCheckBox(this, ID_LOOP_CHECKBOX, "Loop");
+        loopCheckbox_->SetForegroundColour(wxColour(220, 220, 220));
+        loopCheckbox_->SetToolTip("Repeat playback when finished");
+        loopCheckbox_->SetValue(false);
+        row->Add(loopCheckbox_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
         row->AddSpacer(12);
 
-        // Volume icon + slider
-        auto* volIcon = new wxStaticText(this, wxID_ANY, "🔊");
-        volIcon->SetForegroundColour(wxColour(220, 220, 220));
-        row->Add(volIcon, 0, wxALIGN_CENTER_VERTICAL);
+        // Volume label + slider
+        auto* volLabel = new wxStaticText(this, wxID_ANY, "Vol:");
+        volLabel->SetForegroundColour(wxColour(220, 220, 220));
+        row->Add(volLabel, 0, wxALIGN_CENTER_VERTICAL);
 
         volumeSlider_ = new wxSlider(this, ID_VOLUME_SLIDER, 100, 0, 100,
                                       wxDefaultPosition, wxSize(100, -1),
@@ -117,7 +126,7 @@ void ControlPanel::createControls() {
         mainSizer->Add(row, 0, wxEXPAND | wxTOP | wxBOTTOM, 4);
     }
 
-    // ── Row 3: RTMP stream input ──
+    // -- Row 3: RTMP stream input --
     {
         auto* row = new wxBoxSizer(wxHORIZONTAL);
 
@@ -257,14 +266,14 @@ void ControlPanel::updateUI() {
 void ControlPanel::onPlayerStateChanged(PlayerController::State state) {
     switch (state) {
     case PlayerController::Playing:
-        playPauseBtn_->SetLabel("⏸ Pause");
+        playPauseBtn_->SetLabel("Pause");
         break;
     case PlayerController::Paused:
-        playPauseBtn_->SetLabel("▶ Play");
+        playPauseBtn_->SetLabel("Play");
         break;
     case PlayerController::Stopped:
     case PlayerController::Idle:
-        playPauseBtn_->SetLabel("▶ Play");
+        playPauseBtn_->SetLabel("Play");
         seekSlider_->SetValue(0);
         timeLabel_->SetLabel("00:00 / 00:00");
         videoInfoLabel_->SetLabel("");
