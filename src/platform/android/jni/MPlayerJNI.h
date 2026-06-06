@@ -19,4 +19,6 @@ public:
     static jdouble nativeGetDuration(JNIEnv* env, jobject thiz, jlong handle);
     static jdouble nativeGetCurrentPosition(JNIEnv* env, jobject thiz, jlong handle);
     static void nativeSetSurface(JNIEnv* env, jobject thiz, jlong handle, jobject surface);
+    static void nativeSetDecoderType(JNIEnv* env, jobject thiz, jlong handle, jint type);
+    static jboolean nativeIsHardwareDecoding(JNIEnv* env, jobject thiz, jlong handle);
 };

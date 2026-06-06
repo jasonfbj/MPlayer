@@ -4,6 +4,7 @@ add_executable(MPlayerWin WIN32
     MPlayerFrame.cpp
     VideoPanel.cpp
     ControlPanel.cpp
+    SeekSlider.cpp
     D3D11Renderer.cpp
     D3D11VAHardwareDecoder.cpp
     WinAudioOutput.cpp

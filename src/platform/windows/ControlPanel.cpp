@@ -11,6 +11,7 @@ enum {
     ID_RTMP_INPUT,
     ID_RTMP_CONNECT,
     ID_LOOP_CHECKBOX,
+    ID_DECODE_MODE,
 };
 
 wxBEGIN_EVENT_TABLE(ControlPanel, wxPanel)
@@ -23,6 +24,7 @@ wxBEGIN_EVENT_TABLE(ControlPanel, wxPanel)
     EVT_COMBOBOX(ID_SPEED_COMBO, ControlPanel::onSpeedChange)
     EVT_TEXT_ENTER(ID_RTMP_INPUT, ControlPanel::onRtmpConnect)
     EVT_BUTTON(ID_RTMP_CONNECT, ControlPanel::onRtmpConnect)
+    EVT_CHOICE(ID_DECODE_MODE, ControlPanel::onDecodeModeChange)
 wxEND_EVENT_TABLE()
 
 ControlPanel::ControlPanel(MPlayerFrame* frame)
@@ -44,9 +46,9 @@ void ControlPanel::createControls() {
         timeLabel_->SetMinSize(wxSize(120, -1));
         row->Add(timeLabel_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
 
-        seekSlider_ = new wxSlider(this, ID_SEEK_SLIDER, 0, 0, 10000,
-                                    wxDefaultPosition, wxDefaultSize,
-                                    wxSL_HORIZONTAL | wxSL_TICKS);
+        seekSlider_ = new SeekSlider(this, ID_SEEK_SLIDER, 0, 0, 10000,
+                                      wxDefaultPosition, wxDefaultSize,
+                                      wxSL_HORIZONTAL);
         row->Add(seekSlider_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 4);
 
         mainSizer->Add(row, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, 6);
@@ -113,6 +115,20 @@ void ControlPanel::createControls() {
                                       wxCB_DROPDOWN | wxTE_PROCESS_ENTER);
         speedCombo_->SetToolTip("Playback speed");
         row->Add(speedCombo_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
+        row->AddSpacer(12);
+
+        // Decode mode selector
+        auto* decodeLabel = new wxStaticText(this, wxID_ANY, "Decode:");
+        decodeLabel->SetForegroundColour(wxColour(180, 180, 180));
+        row->Add(decodeLabel, 0, wxALIGN_CENTER_VERTICAL);
+
+        wxString decodeModes[] = {"Hardware", "Software"};
+        decodeModeChoice_ = new wxChoice(this, ID_DECODE_MODE,
+                                          wxDefaultPosition, wxSize(90, -1),
+                                          WXSIZEOF(decodeModes), decodeModes);
+        decodeModeChoice_->SetSelection(0);  // Default: Hardware
+        decodeModeChoice_->SetToolTip("Hardware or Software video decoding");
+        row->Add(decodeModeChoice_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
 
         row->AddStretchSpacer();
 
@@ -257,6 +273,15 @@ void ControlPanel::updateUI() {
                                                posMin, posSec));
     }
 
+    // Update video info label with decoder type
+    auto info = player->getVideoInfo();
+    if (!info.codecName.empty()) {
+        wxString hwTag = player->isHardwareDecoding() ? "[HW]" : "[SW]";
+        videoInfoLabel_->SetLabel(wxString::Format("%s %dx%d %s",
+            wxString::FromUTF8(info.codecName),
+            info.width, info.height, hwTag));
+    }
+
     // Update connection state (only for network streams)
     auto connState = player->connectionState();
     switch (connState) {
@@ -296,4 +321,13 @@ void ControlPanel::onPlayerStateChanged(PlayerController::State state) {
         connectionLabel_->SetLabel("");
         break;
     }
+}
+
+void ControlPanel::onDecodeModeChange(wxCommandEvent&) {
+    int sel = decodeModeChoice_->GetSelection();
+    // 0 = Hardware, 1 = Software
+    auto decodeType = (sel == 1)
+        ? DecoderFactory::DecoderType::Software
+        : DecoderFactory::DecoderType::Hardware;
+    frame_->setDecodeMode(decodeType);
 }

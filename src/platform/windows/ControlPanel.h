@@ -8,8 +8,10 @@
 #include <wx/bmpbuttn.h>
 #include <wx/artprov.h>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 
 #include "core/controller/PlayerController.h"
+#include "SeekSlider.h"
 
 class MPlayerFrame;
 
@@ -26,6 +28,9 @@ public:
     // Loop mode query
     bool isLoopEnabled() const { return loopCheckbox_->GetValue(); }
 
+    // Sync UI dropdown with actual decoder type (e.g., after HW→SW fallback)
+    void setDecodeModeSelection(int index) { decodeModeChoice_->SetSelection(index); }
+
 private:
     void createControls();
 
@@ -37,6 +42,7 @@ private:
     void onSpeedChange(wxCommandEvent& event);
     void onRtmpConnect(wxCommandEvent& event);
     void onFileOpen(wxCommandEvent& event);
+    void onDecodeModeChange(wxCommandEvent& event);
 
     MPlayerFrame* frame_ = nullptr;
 
@@ -44,7 +50,7 @@ private:
     wxButton* playPauseBtn_ = nullptr;
     wxButton* stopBtn_ = nullptr;
     wxButton* openFileBtn_ = nullptr;
-    wxSlider* seekSlider_ = nullptr;
+    SeekSlider* seekSlider_ = nullptr;
     wxStaticText* timeLabel_ = nullptr;
     wxSlider* volumeSlider_ = nullptr;
     wxStaticText* volumeLabel_ = nullptr;
@@ -54,6 +60,7 @@ private:
     wxStaticText* videoInfoLabel_ = nullptr;
     wxStaticText* connectionLabel_ = nullptr;
     wxCheckBox* loopCheckbox_ = nullptr;
+    wxChoice* decodeModeChoice_ = nullptr;
 
     bool seeking_ = false;
 

@@ -23,9 +23,15 @@ std::unique_ptr<IDecoder> DecoderFactory::createVideoDecoder(
                 return decoder;
             }
         }
+        // When user explicitly chose Hardware, don't silently fall back to Software.
+        // Return nullptr so the caller can report the error to the user.
+        if (type == DecoderType::Hardware) {
+            return nullptr;
+        }
+        // Auto mode: fall back to software decoder
     }
 
-    // Fallback to software decoder
+    // Software decoder (or Auto fallback)
     auto decoder = std::make_unique<SoftwareDecoder>();
     if (decoder->init(params)) {
         return decoder;

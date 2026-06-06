@@ -58,7 +58,7 @@ bool PlayerController::open(const std::string& url) {
 
         videoDecoder_ = DecoderFactory::createVideoDecoder(
             demuxer_->getVideoParams(),
-            DecoderFactory::DecoderType::Auto,
+            decoderType_.load(),
             device
         );
         if (!videoDecoder_) {
@@ -109,7 +109,7 @@ bool PlayerController::open(const std::string& url, const NetworkConfig& config)
 
         videoDecoder_ = DecoderFactory::createVideoDecoder(
             demuxer_->getVideoParams(),
-            DecoderFactory::DecoderType::Auto,
+            decoderType_.load(),
             device
         );
         if (!videoDecoder_) {
@@ -692,6 +692,11 @@ void PlayerController::setConnectionCallback(ConnectionCallback cb) {
 
 ConnectionState PlayerController::connectionState() const {
     return demuxer_ ? demuxer_->connectionState() : ConnectionState::Disconnected;
+}
+
+bool PlayerController::isHardwareDecoding() const {
+    bool hw = videoDecoder_ && videoDecoder_->isHardware();
+    return hw;
 }
 
 void PlayerController::initAudioResampler() {

@@ -42,6 +42,7 @@ public:
     void setVolume(float volume);
     void setSpeed(float speed);
     void captureScreenshot();
+    void setDecodeMode(DecoderFactory::DecoderType type);
 
     // State query
     bool isPlaying() const;

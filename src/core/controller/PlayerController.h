@@ -45,6 +45,11 @@ public:
     void setSpeed(float speed);
     void setVolume(float volume);
 
+    void setDecoderType(DecoderFactory::DecoderType type) { decoderType_ = type; }
+    DecoderFactory::DecoderType decoderType() const { return decoderType_.load(); }
+
+    bool isHardwareDecoding() const;
+
     enum State { Idle, Playing, Paused, Stopped };
     State state() const { return state_; }
     double duration() const;
@@ -126,6 +131,7 @@ private:
     std::atomic<State> state_{Idle};
     std::atomic<float> speed_{1.0f};
     std::atomic<double> currentPosition_{0.0};
+    std::atomic<DecoderFactory::DecoderType> decoderType_{DecoderFactory::DecoderType::Hardware};
     std::string currentUrl_;
     mutable std::mutex mutex_;
 

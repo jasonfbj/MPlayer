@@ -24,6 +24,8 @@ public class MPlayerNative {
     public double getDuration() { return nativeGetDuration(nativeHandle); }
     public double getCurrentPosition() { return nativeGetCurrentPosition(nativeHandle); }
     public void setSurface(Object surface) { nativeSetSurface(nativeHandle, surface); }
+    public void setDecoderType(int type) { nativeSetDecoderType(nativeHandle, type); }
+    public boolean isHardwareDecoding() { return nativeIsHardwareDecoding(nativeHandle); }
 
     public void release() {
         if (nativeHandle != 0) {
@@ -45,6 +47,8 @@ public class MPlayerNative {
     private native double nativeGetDuration(long handle);
     private native double nativeGetCurrentPosition(long handle);
     private native void nativeSetSurface(long handle, Object surface);
+    private native void nativeSetDecoderType(long handle, int type);
+    private native boolean nativeIsHardwareDecoding(long handle);
 
     static {
         System.loadLibrary("MPlayerAndroid");

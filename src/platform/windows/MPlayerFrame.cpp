@@ -250,6 +250,45 @@ void MPlayerFrame::setSpeed(float speed) {
     if (player_) player_->setSpeed(speed);
 }
 
+void MPlayerFrame::setDecodeMode(DecoderFactory::DecoderType type) {
+    if (!player_) return;
+    if (player_->decoderType() == type) return;
+
+    // Save current state for reopen
+    auto prevState = player_->state();
+    double pos = player_->currentPosition();
+
+    player_->setDecoderType(type);
+
+    // Reopen current file with new decoder type if something was loaded
+    if (prevState != PlayerController::Idle && !lastOpenedUrl_.empty()) {
+        player_->close();
+        if (player_->open(lastOpenedUrl_)) {
+            player_->play();
+            // Seek back to previous position
+            if (pos > 0) {
+                player_->seek(pos);
+            }
+        } else {
+            // Hardware decode failed — fall back to software so the user can still play
+            player_->setDecoderType(DecoderFactory::DecoderType::Software);
+            if (player_->open(lastOpenedUrl_)) {
+                player_->play();
+                if (pos > 0) {
+                    player_->seek(pos);
+                }
+                // Sync the UI dropdown to reflect the actual (Software) mode
+                if (controlPanel_) {
+                    controlPanel_->setDecodeModeSelection(1);  // 1 = Software
+                }
+                wxMessageBox("Hardware decode failed for this video. "
+                             "Switched to Software decode.",
+                             "Decode Mode", wxOK | wxICON_INFORMATION, this);
+            }
+        }
+    }
+}
+
 void MPlayerFrame::captureScreenshot() {
     if (!player_) return;
     wxFileDialog dlg(this, "Save Screenshot", "", "screenshot.png",
@@ -379,10 +418,11 @@ void MPlayerFrame::updateStatusBar() {
     }
 
     if (!info.codecName.empty()) {
-        wxString infoStr = wxString::Format("%s %dx%d %.1ffps",
+        wxString hwTag = player_->isHardwareDecoding() ? "[HW]" : "[SW]";
+        wxString infoStr = wxString::Format("%s %dx%d %.1ffps %s",
                                             wxString::FromUTF8(info.codecName),
                                             info.width, info.height,
-                                            info.frameRate);
+                                            info.frameRate, hwTag);
         SetStatusText(infoStr, 2);
     }
 }

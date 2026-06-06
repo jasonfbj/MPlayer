@@ -28,6 +28,8 @@ static JNINativeMethod methods[] = {
     {"nativeGetDuration", "(J)D", (void*)MPlayerJNI::nativeGetDuration},
     {"nativeGetCurrentPosition", "(J)D", (void*)MPlayerJNI::nativeGetCurrentPosition},
     {"nativeSetSurface", "(JLjava/lang/Object;)V", (void*)MPlayerJNI::nativeSetSurface},
+    {"nativeSetDecoderType", "(JI)V", (void*)MPlayerJNI::nativeSetDecoderType},
+    {"nativeIsHardwareDecoding", "(J)Z", (void*)MPlayerJNI::nativeIsHardwareDecoding},
 };
 
 void MPlayerJNI::registerNatives(JavaVM* vm) {
@@ -165,6 +167,23 @@ void MPlayerJNI::nativeSetSurface(JNIEnv* env, jobject thiz, jlong handle, jobje
         }
         return decoder;
     });
+}
+
+void MPlayerJNI::nativeSetDecoderType(JNIEnv* env, jobject thiz, jlong handle, jint type) {
+    auto* player = reinterpret_cast<PlayerController*>(handle);
+    if (!player) return;
+
+    // 0 = Hardware, 1 = Software
+    auto decodeType = (type == 1)
+        ? DecoderFactory::DecoderType::Software
+        : DecoderFactory::DecoderType::Hardware;
+    player->setDecoderType(decodeType);
+}
+
+jboolean MPlayerJNI::nativeIsHardwareDecoding(JNIEnv* env, jobject thiz, jlong handle) {
+    auto* player = reinterpret_cast<PlayerController*>(handle);
+    if (!player) return JNI_FALSE;
+    return player->isHardwareDecoding() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
